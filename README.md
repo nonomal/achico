@@ -22,6 +22,9 @@ Download from the [releases](https://github.com/nuance-dev/Achico/releases/) pag
 3. Download your compressed file
 4. That's it!
 
+
+https://github.com/user-attachments/assets/e494937d-7e52-4d6c-9046-d6b0d577c67e
+
 ## 🛠 Technical Details
 - Built natively for macOS using SwiftUI and PDFKit
 - Utilizes advanced compression algorithms while maintaining PDF quality
