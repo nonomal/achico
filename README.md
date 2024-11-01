@@ -13,6 +13,8 @@ A lightweight, native macOS app that compresses PDF files while maintaining qual
 - **Dark and Light modes**: Seamlessly integrates with your system preferences
 - **Native Performance**: Built with SwiftUI for optimal macOS integration
 
+https://github.com/user-attachments/assets/e494937d-7e52-4d6c-9046-d6b0d577c67e
+
 ## 💻 Get Started
 Download from the [releases](https://github.com/nuance-dev/Achico/releases/) page.
 
@@ -21,9 +23,6 @@ Download from the [releases](https://github.com/nuance-dev/Achico/releases/) pag
 2. Watch the magic happen
 3. Download your compressed file
 4. That's it!
-
-
-https://github.com/user-attachments/assets/e494937d-7e52-4d6c-9046-d6b0d577c67e
 
 ## 🛠 Technical Details
 - Built natively for macOS using SwiftUI and PDFKit
