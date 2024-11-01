@@ -53,7 +53,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 🔗 Links
 - Report issues: [GitHub Issues](https://github.com/nuance-dev/Achico/issues)
-- Follow updates: [@YourTwitter](https://twitter.com/Nuancedev)
+- Follow updates: [@NuanceDev](https://twitter.com/Nuancedev)
 
 ## Requirements
 - macOS 14.0 or later
