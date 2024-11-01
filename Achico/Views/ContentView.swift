@@ -15,14 +15,39 @@ struct ContentView: View {
             
             VStack(spacing: 20) {
                 if pdfProcessor.isProcessing {
-                    VStack(spacing: 8) {
-                        ProgressView()
-                            .scaleEffect(0.8)
-                        Text("Compressing...")
-                            .font(.system(size: 13))
-                            .foregroundColor(.secondary)
+                    VStack(spacing: 24) {
+                        // Progress Circle
+                        ZStack {
+                            Circle()
+                                .stroke(Color.secondary.opacity(0.2), lineWidth: 4)
+                                .frame(width: 60, height: 60)
+                            
+                            Circle()
+                                .trim(from: 0, to: pdfProcessor.progress)
+                                .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 4, lineCap: .round))
+                                .frame(width: 60, height: 60)
+                                .rotationEffect(.degrees(-90))
+                            
+                            Text("\(Int(pdfProcessor.progress * 100))%")
+                                .font(.system(size: 14, weight: .medium))
+                        }
+                        
+                        VStack(spacing: 8) {
+                            Text("Compressing PDF")
+                                .font(.system(size: 16, weight: .semibold))
+                            Text("This may take a moment...")
+                                .font(.system(size: 14))
+                                .foregroundColor(.secondary)
+                        }
                     }
-                    .padding()
+                    .frame(maxWidth: 320)
+                    .padding(32)
+                    .background(
+                        RoundedRectangle(cornerRadius: 16)
+                            .fill(Color(NSColor.windowBackgroundColor))
+                            .opacity(0.8)
+                            .shadow(color: Color.black.opacity(0.1), radius: 20, x: 0, y: 10)
+                    )
                 } else if let result = pdfProcessor.processingResult {
                     ResultView(result: result) {
                         Task {
@@ -115,6 +140,7 @@ struct ContentView: View {
             }
         }
     }
+    
     
     @MainActor
     private func saveCompressedFile(url: URL, originalName: String) async {

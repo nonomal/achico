@@ -7,7 +7,9 @@ class PDFProcessor: ObservableObject {
     @Published var isProcessing = false
     @Published var progress: Double = 0
     @Published var processingResult: ProcessingResult?
-    private var tempFiles: [URL] = []
+    
+    private let processingQueue = DispatchQueue(label: "com.achico.pdfprocessing", qos: .userInitiated)
+    private let cacheManager = PDFCacheManager.shared
     
     struct ProcessingResult {
         let originalSize: Int64
@@ -18,19 +20,12 @@ class PDFProcessor: ObservableObject {
         var savedPercentage: Int {
             guard originalSize > 0 else { return 0 }
             let percentage = Int(((Double(originalSize) - Double(compressedSize)) / Double(originalSize)) * 100)
-            return max(0, percentage) // Ensure percentage is never negative
+            return max(0, percentage)
         }
     }
     
     deinit {
-        cleanupTempFiles()
-    }
-    
-    private func cleanupTempFiles() {
-        for url in tempFiles {
-            try? FileManager.default.removeItem(at: url)
-        }
-        tempFiles.removeAll()
+        cleanup()
     }
     
     @MainActor
@@ -39,53 +34,23 @@ class PDFProcessor: ObservableObject {
         progress = 0
         processingResult = nil
         
-        cleanupTempFiles()
-        
         do {
-            let originalSize = try FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int64 ?? 0
-            
-            // Create a copy of the input file
-            let tempURL = FileManager.default.temporaryDirectory
-                .appendingPathComponent("compressed_\(UUID().uuidString)")
-                .appendingPathExtension("pdf")
-            
-            try FileManager.default.copyItem(at: url, to: tempURL)
-            tempFiles.append(tempURL)
-            
-            guard let document = PDFDocument(url: url) else {
-                throw NSError(domain: "", code: 0, userInfo: [NSLocalizedDescriptionKey: "Failed to load PDF"])
-            }
-            
-            // Create new document
-            let newDocument = PDFDocument()
-            
-            for i in 0..<document.pageCount {
-                autoreleasepool {
-                    if let page = document.page(at: i) {
-                        // Try to compress the page, if fails, use original
-                        if let compressedPage = try? compressPage(page) {
-                            newDocument.insert(compressedPage, at: i)
-                        } else {
-                            newDocument.insert(page, at: i)
+            let result = try await withCheckedThrowingContinuation { continuation in
+                processingQueue.async {
+                    do {
+                        let result = try self.processInBackground(url: url)
+                        DispatchQueue.main.async {
+                            continuation.resume(returning: result)
+                        }
+                    } catch {
+                        DispatchQueue.main.async {
+                            continuation.resume(throwing: error)
                         }
                     }
                 }
-                
-                progress = Double(i + 1) / Double(document.pageCount)
             }
             
-            // Save the document
-            newDocument.write(to: tempURL)
-            
-            let compressedSize = try FileManager.default.attributesOfItem(atPath: tempURL.path)[.size] as? Int64 ?? 0
-            
-            // Always create a result, even if compression didn't reduce size
-            processingResult = ProcessingResult(
-                originalSize: originalSize,
-                compressedSize: compressedSize,
-                compressedURL: tempURL,
-                fileName: url.lastPathComponent
-            )
+            self.processingResult = result
             
         } catch {
             isProcessing = false
@@ -96,10 +61,52 @@ class PDFProcessor: ObservableObject {
         progress = 1.0
     }
     
+    private func processInBackground(url: URL) throws -> ProcessingResult {
+        let originalSize = try FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int64 ?? 0
+        
+        // Create output file in cache directory
+        let tempURL = try cacheManager.createTemporaryURL(for: url.lastPathComponent)
+        
+        guard let document = PDFDocument(url: url) else {
+            throw NSError(domain: "", code: 0, userInfo: [NSLocalizedDescriptionKey: "Failed to load PDF"])
+        }
+        
+        // Create new document
+        let newDocument = PDFDocument()
+        let totalPages = document.pageCount
+        
+        for i in 0..<totalPages {
+            autoreleasepool {
+                if let page = document.page(at: i) {
+                    if let compressedPage = try? compressPage(page) {
+                        newDocument.insert(compressedPage, at: i)
+                    } else {
+                        newDocument.insert(page, at: i)
+                    }
+                }
+            }
+            
+            DispatchQueue.main.async {
+                self.progress = Double(i + 1) / Double(totalPages)
+            }
+        }
+        
+        // Save the document
+        newDocument.write(to: tempURL)
+        
+        let compressedSize = try FileManager.default.attributesOfItem(atPath: tempURL.path)[.size] as? Int64 ?? 0
+        
+        return ProcessingResult(
+            originalSize: originalSize,
+            compressedSize: compressedSize,
+            compressedURL: tempURL,
+            fileName: url.lastPathComponent
+        )
+    }
+    
     private func compressPage(_ page: PDFPage) throws -> PDFPage? {
         let pageRect = page.bounds(for: .mediaBox)
         
-        // Create NSImage from page
         let image = NSImage(size: pageRect.size)
         image.lockFocus()
         if let context = NSGraphicsContext.current?.cgContext {
@@ -107,7 +114,6 @@ class PDFProcessor: ObservableObject {
         }
         image.unlockFocus()
         
-        // Compress using JPEG compression
         guard let tiffData = image.tiffRepresentation,
               let bitmap = NSBitmapImageRep(data: tiffData),
               let compressedData = bitmap.representation(
@@ -122,7 +128,7 @@ class PDFProcessor: ObservableObject {
     }
     
     func cleanup() {
-        cleanupTempFiles()
         processingResult = nil
+        cacheManager.cleanupOldFiles()
     }
 }

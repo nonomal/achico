@@ -3,6 +3,7 @@ import AppKit
 
 @main
 struct AchicoApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @AppStorage("isDarkMode") private var isDarkMode = false
     
     var body: some Scene {
