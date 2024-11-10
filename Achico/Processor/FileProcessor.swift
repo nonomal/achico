@@ -52,6 +52,128 @@ class FileProcessor: ObservableObject {
         }
     }
     
+    private func processAudio(from url: URL, to tempURL: URL, settings: CompressionSettings) async throws {
+        let asset = AVURLAsset(url: url)
+        let fileType = FileType(url: url)
+        
+        // Create a composition to work with the audio
+        let composition = AVMutableComposition()
+        
+        // Try to get the audio track from the asset
+        guard let audioTrack = try? await asset.loadTracks(withMediaType: .audio).first,
+              let compositionTrack = composition.addMutableTrack(
+                withMediaType: .audio,
+                preferredTrackID: kCMPersistentTrackID_Invalid) else {
+            throw CompressionError.compressionFailed
+        }
+        
+        // Get asset duration using the new API
+        let duration = try await asset.load(.duration)
+        
+        // Insert the audio track into the composition
+        try compositionTrack.insertTimeRange(
+            CMTimeRange(start: .zero, duration: duration),
+            of: audioTrack,
+            at: .zero
+        )
+        
+        // Determine preset and output file type
+        let (presetName, outputFileType): (String, AVFileType) = {
+            switch fileType {
+            case .mp3, .wav, .aiff, .m4a:
+                return (AVAssetExportPresetAppleM4A, .m4a)
+            default:
+                return (AVAssetExportPresetAppleM4A, .m4a)
+            }
+        }()
+        
+        // Create export session with the composition
+        guard let exportSession = AVAssetExportSession(
+            asset: composition,
+            presetName: presetName
+        ) else {
+            throw CompressionError.compressionFailed
+        }
+        
+        // Create output URL with correct extension
+        let outputURL = tempURL.deletingPathExtension().appendingPathExtension("m4a")
+        
+        // Remove any existing file at the output URL
+        if FileManager.default.fileExists(atPath: outputURL.path) {
+            try? FileManager.default.removeItem(at: outputURL)
+        }
+        
+        // Ensure the output directory exists
+        try FileManager.default.createDirectory(
+            at: outputURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true,
+            attributes: nil
+        )
+        
+        // Configure export session
+        exportSession.outputURL = outputURL
+        exportSession.outputFileType = outputFileType
+        
+        // Monitor progress in a separate task
+        let progressTask = Task {
+            while !Task.isCancelled &&
+                  (exportSession.status == .waiting || exportSession.status == .exporting) {
+                await MainActor.run {
+                    self.progress = Double(exportSession.progress)
+                }
+                try? await Task.sleep(nanoseconds: 100_000_000) // Sleep for 0.1 seconds
+            }
+        }
+        
+        // Start exporting and await completion
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            exportSession.exportAsynchronously {
+                switch exportSession.status {
+                case .completed:
+                    // Verify the file exists after export
+                    if FileManager.default.fileExists(atPath: outputURL.path) {
+                        continuation.resume()
+                    } else {
+                        print("Export completed but file not found at: \(outputURL.path)")
+                        continuation.resume(throwing: CompressionError.compressionFailed)
+                    }
+                case .failed:
+                    if let error = exportSession.error {
+                        print("Export Session Failed: \(error.localizedDescription)")
+                        print("Error Details: \(String(describing: error))")
+                        continuation.resume(throwing: error)
+                    } else {
+                        print("Export Session Failed without error details")
+                        continuation.resume(throwing: CompressionError.compressionFailed)
+                    }
+                case .cancelled:
+                    print("Export Session Cancelled")
+                    continuation.resume(throwing: CompressionError.compressionFailed)
+                default:
+                    print("Export Session ended with status: \(exportSession.status.rawValue)")
+                    continuation.resume(throwing: CompressionError.compressionFailed)
+                }
+            }
+        }
+        
+        // Cancel the progress monitoring task
+        progressTask.cancel()
+        
+        // Verify the file exists one final time
+        guard FileManager.default.fileExists(atPath: outputURL.path) else {
+            throw CompressionError.compressionFailed
+        }
+        
+        // Make sure we're returning the correct path
+        if outputURL != tempURL {
+            try? FileManager.default.removeItem(at: tempURL)
+            try FileManager.default.moveItem(at: outputURL, to: tempURL)
+        }
+        
+        await MainActor.run {
+            self.progress = 1.0
+        }
+    }
     
     // MARK: - Lifecycle
     deinit {
@@ -90,8 +212,10 @@ class FileProcessor: ObservableObject {
         let compressionSettings = settings ?? CompressionSettings()
         
         let fileType = FileType(url: url)
-        if fileType.isVideo {
-            try await processVideo(from: url, to: tempURL, settings: compressionSettings)
+            if fileType.isVideo {
+                try await processVideo(from: url, to: tempURL, settings: compressionSettings)
+            } else if fileType.isAudio {
+                try await processAudio(from: url, to: tempURL, settings: compressionSettings)
         } else {
             switch url.pathExtension.lowercased() {
             case "pdf":
@@ -122,13 +246,13 @@ class FileProcessor: ObservableObject {
         }
         
         let compressedSize = try FileManager.default.attributesOfItem(atPath: tempURL.path)[.size] as? Int64 ?? 0
-        
-        return ProcessingResult(
-            originalSize: originalSize,
-            compressedSize: compressedSize,
-            compressedURL: tempURL,
-            fileName: url.lastPathComponent
-        )
+
+            return ProcessingResult(
+                originalSize: originalSize,
+                compressedSize: compressedSize,
+                compressedURL: tempURL,
+                fileName: url.lastPathComponent
+            )
     }
     
     private func processVideo(from url: URL, to tempURL: URL, settings: CompressionSettings) async throws {
@@ -633,6 +757,10 @@ class FileProcessor: ObservableObject {
             case avi
             case mpeg2
             case quickTime
+            case mp3
+            case wav
+            case m4a
+            case aiff
             case unknown
             
             init(url: URL) {
@@ -653,9 +781,22 @@ class FileProcessor: ObservableObject {
                 case "avi": self = .avi
                 case "mpg", "mpeg": self = .mpeg2
                 case "qt": self = .quickTime
+                case "mp3": self = .mp3
+                case "wav": self = .wav
+                case "m4a": self = .m4a
+                case "aiff", "aif": self = .aiff
                 default: self = .unknown
                 }
             }
+            
+            var isAudio: Bool {
+                        switch self {
+                        case .mp3, .wav, .m4a, .aiff:
+                            return true
+                        default:
+                            return false
+                        }
+                    }
             
             var isVideo: Bool {
                 switch self {
@@ -680,6 +821,10 @@ class FileProcessor: ObservableObject {
                 case .raw: return "jpg"
                 case .ico: return "png"
                 case .mp4, .mov, .avi, .mpeg2, .quickTime: return "mp4"
+                case .mp3: return "mp3"
+                case .wav: return "wav"
+                case .m4a: return "m4a"
+                case .aiff: return "aiff"
                 case .unknown: return ""
                 }
             }

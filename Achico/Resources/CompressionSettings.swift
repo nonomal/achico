@@ -7,6 +7,8 @@ public struct CompressionSettings {
     var preserveMetadata: Bool = false
     var maxDimension: CGFloat? = nil  // Downsample if larger
     var optimizeForWeb: Bool = true   // Additional optimizations for web use
+    var audioBitRate: Int?        // In bits per second
+    var audioSampleRate: Double? // In Hertz
     
     public init(
         quality: CGFloat = 0.7,

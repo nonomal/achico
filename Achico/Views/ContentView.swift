@@ -22,11 +22,15 @@ struct ContentView: View {
         .svg,      // SVG Images
         .rawImage, // RAW Images
         .ico,      // ICO Images
-        .mpeg4Movie,    // MP4
+        .mpeg4Movie,    // MP4 Video
         .movie,         // MOV
         .avi,          // AVI
         .mpeg2Video,   // MPEG-2
-        .quickTimeMovie // QuickTime
+        .quickTimeMovie, // QuickTime
+        .mpeg4Audio,     // MP4 Audio
+        .mp3,          // MP3 Audio
+        .wav,          // WAV Audio
+        .aiff,         // AIFF Audio
     ]
     
     var body: some View {
