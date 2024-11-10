@@ -27,12 +27,6 @@ A lightweight, native macOS app that intelligently compresses files while mainta
 
 ![compression-demo](https://github.com/user-attachments/assets/e494937d-7e52-4d6c-9046-d6b0d577c67e)
 
-Update, from v2 onwards you can resize your files!
-![42630](https://github.com/user-attachments/assets/6def2137-fd12-4f7d-b59a-4476ae506331)
-
-![38565](https://github.com/user-attachments/assets/22dde098-e236-4f6e-8c18-262bdae699d6)
-
-
 
 ## 💻 Get Started
 
@@ -45,6 +39,11 @@ Download from the [releases](https://github.com/nuance-dev/Achico/releases/) pag
 3. Watch the magic happen
 4. Get your compressed files
 5. That's it!
+6. Update, from v2 onwards you can resize your files!
+![42630](https://github.com/user-attachments/assets/6def2137-fd12-4f7d-b59a-4476ae506331)
+
+![38565](https://github.com/user-attachments/assets/22dde098-e236-4f6e-8c18-262bdae699d6)
+
 
 ## 🛠 Technical Details
 
