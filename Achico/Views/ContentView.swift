@@ -18,7 +18,15 @@ struct ContentView: View {
         .heic,     // HEIC Images
         .gif,      // GIF Images
         .bmp,      // BMP Images
-        .webP      // WebP Images
+        .webP,     // WebP Images
+        .svg,      // SVG Images
+        .rawImage, // RAW Images
+        .ico,      // ICO Images
+        .mpeg4Movie,    // MP4
+        .movie,         // MOV
+        .avi,          // AVI
+        .mpeg2Video,   // MPEG-2
+        .quickTimeMovie // QuickTime
     ]
     
     var body: some View {

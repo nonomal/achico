@@ -3,23 +3,14 @@ import PDFKit
 import UniformTypeIdentifiers
 import AppKit
 import CoreGraphics
+import AVFoundation
 
-class FileProcessor: ObservableObject {
-    // MARK: - Published Properties
-    @Published var isProcessing = false
-    @Published var progress: Double = 0
-    @Published var processingResult: ProcessingResult?
-    
-    // MARK: - Private Properties
-    private let processingQueue = DispatchQueue(label: "com.achico.fileprocessing", qos: .userInitiated)
-    private let cacheManager = CacheManager.shared
-    
-    // MARK: - Types
-    enum CompressionError: LocalizedError {
+enum CompressionError: LocalizedError {
         case unsupportedFormat
         case conversionFailed
         case compressionFailed
         case invalidInput
+        case videoProcessingFailed
         
         var errorDescription: String? {
             switch self {
@@ -31,9 +22,22 @@ class FileProcessor: ObservableObject {
                 return "Failed to compress the file"
             case .invalidInput:
                 return "The input file is invalid or corrupted"
+            case .videoProcessingFailed:
+                return "Failed to process video file"
             }
         }
     }
+
+class FileProcessor: ObservableObject {
+    // MARK: - Published Properties
+    @Published var isProcessing = false
+    @Published var progress: Double = 0
+    @Published var processingResult: ProcessingResult?
+    
+    // MARK: - Private Properties
+    private let processingQueue = DispatchQueue(label: "com.achico.fileprocessing", qos: .userInitiated)
+    private let cacheManager = CacheManager.shared
+    private let videoProcessor = VideoProcessor()
     
     struct ProcessingResult {
         let originalSize: Int64
@@ -47,7 +51,7 @@ class FileProcessor: ObservableObject {
             return max(0, percentage)
         }
     }
-
+    
     
     // MARK: - Lifecycle
     deinit {
@@ -62,23 +66,8 @@ class FileProcessor: ObservableObject {
         processingResult = nil
         
         do {
-            let result = try await withCheckedThrowingContinuation { continuation in
-                processingQueue.async {
-                    do {
-                        let result = try self.processInBackground(url: url, settings: settings)
-                        DispatchQueue.main.async {
-                            continuation.resume(returning: result)
-                        }
-                    } catch {
-                        DispatchQueue.main.async {
-                            continuation.resume(throwing: error)
-                        }
-                    }
-                }
-            }
-            
+            let result = try await processInBackground(url: url, settings: settings)
             self.processingResult = result
-            
         } catch {
             isProcessing = false
             throw error
@@ -94,33 +83,42 @@ class FileProcessor: ObservableObject {
     }
     
     // MARK: - Private Methods - Main Processing
-    private func processInBackground(url: URL, settings: CompressionSettings? = nil) throws -> ProcessingResult {
-        print("Debug - Processing with settings:", settings ?? "default")  // Debug log
-           let originalSize = try FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int64 ?? 0
-           let tempURL = try cacheManager.createTemporaryURL(for: url.lastPathComponent)
-           
-           let compressionSettings = settings ?? CompressionSettings()
-           print("Debug - Max dimension:", compressionSettings.maxDimension ?? "not set")  
+    private func processInBackground(url: URL, settings: CompressionSettings? = nil) async throws -> ProcessingResult {
+        let originalSize = try FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int64 ?? 0
+        let tempURL = try cacheManager.createTemporaryURL(for: url.lastPathComponent)
         
-        switch url.pathExtension.lowercased() {
-        case "pdf":
-            try processPDF(from: url, to: tempURL)
-        case "jpg", "jpeg":
-            try processJPEG(from: url, to: tempURL, settings: compressionSettings)
-        case "png":
-            try processPNG(from: url, to: tempURL, settings: compressionSettings)
-        case "heic":
-            try processHEIC(from: url, to: tempURL, settings: compressionSettings)
-        case "tiff", "tif":
-            try processTIFF(from: url, to: tempURL, settings: compressionSettings)
-        case "gif":
-            try processGIF(from: url, to: tempURL)
-        case "bmp":
-            try processBMP(from: url, to: tempURL, settings: compressionSettings)
-        case "webp":
-            try processWebP(from: url, to: tempURL, settings: compressionSettings)
-        default:
-            throw CompressionError.unsupportedFormat
+        let compressionSettings = settings ?? CompressionSettings()
+        
+        let fileType = FileType(url: url)
+        if fileType.isVideo {
+            try await processVideo(from: url, to: tempURL, settings: compressionSettings)
+        } else {
+            switch url.pathExtension.lowercased() {
+            case "pdf":
+                try processPDF(from: url, to: tempURL)
+            case "jpg", "jpeg":
+                try processJPEG(from: url, to: tempURL, settings: compressionSettings)
+            case "png":
+                try processPNG(from: url, to: tempURL, settings: compressionSettings)
+            case "heic":
+                try processHEIC(from: url, to: tempURL, settings: compressionSettings)
+            case "tiff", "tif":
+                try processTIFF(from: url, to: tempURL, settings: compressionSettings)
+            case "gif":
+                try processGIF(from: url, to: tempURL)
+            case "bmp":
+                try processBMP(from: url, to: tempURL, settings: compressionSettings)
+            case "webp":
+                try processWebP(from: url, to: tempURL, settings: compressionSettings)
+            case "svg":
+                try processSVG(from: url, to: tempURL, settings: compressionSettings)
+            case "raw", "cr2", "nef", "arw":
+                try processRAW(from: url, to: tempURL, settings: compressionSettings)
+            case "ico":
+                try processICO(from: url, to: tempURL, settings: compressionSettings)
+            default:
+                throw CompressionError.unsupportedFormat
+            }
         }
         
         let compressedSize = try FileManager.default.attributesOfItem(atPath: tempURL.path)[.size] as? Int64 ?? 0
@@ -132,6 +130,84 @@ class FileProcessor: ObservableObject {
             fileName: url.lastPathComponent
         )
     }
+    
+    private func processVideo(from url: URL, to tempURL: URL, settings: CompressionSettings) async throws {
+        let videoSettings = VideoProcessor.VideoCompressionSettings(
+            quality: Float(settings.quality),
+            maxWidth: settings.maxDimension != nil ? Int(settings.maxDimension!) : nil,
+            bitrateMultiplier: 0.7,
+            frameRate: 30,
+            audioEnabled: true
+        )
+        
+        do {
+            try await videoProcessor.compressVideo(
+                inputURL: url,
+                outputURL: tempURL,
+                settings: videoSettings
+            ) { [weak self] progress in
+                Task { @MainActor in
+                    self?.progress = Double(progress)
+                }
+            }
+        } catch {
+            throw CompressionError.videoProcessingFailed
+        }
+    }
+    
+    private func processICO(from url: URL, to tempURL: URL, settings: CompressionSettings) throws {
+        guard let image = NSImage(contentsOf: url) else {
+            throw CompressionError.conversionFailed
+        }
+        
+        guard let compressedData = compressImage(image, format: .png, settings: settings) else {
+            throw CompressionError.compressionFailed
+        }
+        
+        let pngURL = tempURL.deletingPathExtension().appendingPathExtension("png")
+        try compressedData.write(to: pngURL)
+    }
+    
+    private func processSVG(from url: URL, to tempURL: URL, settings: CompressionSettings) throws {
+        guard let data = try? Data(contentsOf: url),
+              let svgString = String(data: data, encoding: .utf8) else {
+            throw CompressionError.conversionFailed
+        }
+        
+        let cleanedSVG = svgString
+            .replacingOccurrences(of: "<!--[\\s\\S]*?-->", with: "", options: .regularExpression)
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .replacingOccurrences(of: "> <", with: "><")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        try cleanedSVG.data(using: .utf8)?.write(to: tempURL)
+    }
+    
+    
+    private func processRAW(from url: URL, to tempURL: URL, settings: CompressionSettings) throws {
+        guard let imageSource = CGImageSourceCreateWithURL(url as CFURL, nil) else {
+            throw CompressionError.conversionFailed
+        }
+        
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: settings.maxDimension ?? 2048
+        ]
+        
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(imageSource, 0, options as CFDictionary) else {
+            throw CompressionError.conversionFailed
+        }
+        
+        let image = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
+        guard let compressedData = compressImage(image, format: .jpeg, settings: settings) else {
+            throw CompressionError.compressionFailed
+        }
+        
+        let jpegURL = tempURL.deletingPathExtension().appendingPathExtension("jpg")
+        try compressedData.write(to: jpegURL)
+    }
+    
     
     // MARK: - Private Methods - Format-Specific Processing
     private func processPDF(from url: URL, to tempURL: URL) throws {
@@ -318,7 +394,7 @@ class FileProcessor: ObservableObject {
         
         let bitmapRep = NSBitmapImageRep(cgImage: processedCGImage)
         print("Debug - Final image size: \(bitmapRep.size.width) x \(bitmapRep.size.height)")
-
+        
         var compressionProperties: [NSBitmapImageRep.PropertyKey: Any] = [:]
         
         switch format {
@@ -407,180 +483,205 @@ class FileProcessor: ObservableObject {
         
         if let properties = CGImageSourceCopyProperties(imageSource, nil) {
             CGImageDestinationSetProperties(destination, properties)
-                    }
-                    
-                    let options: [CFString: Any] = [
-                        kCGImageSourceCreateThumbnailFromImageAlways: true,
-                        kCGImageSourceCreateThumbnailWithTransform: true,
-                        kCGImageSourceThumbnailMaxPixelSize: 1024
+        }
+        
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: 1024
+        ]
+        
+        for i in 0..<frameCount {
+            autoreleasepool {
+                guard let frameProperties = CGImageSourceCopyPropertiesAtIndex(imageSource, i, nil) else {
+                    return
+                }
+                
+                // Extract GIF-specific properties
+                let gifProperties = (frameProperties as Dictionary)[kCGImagePropertyGIFDictionary] as? Dictionary<CFString, Any>
+                
+                // Get delay time for the frame
+                let defaultDelay = 0.1
+                let delayTime: Double
+                if let delay = gifProperties?[kCGImagePropertyGIFDelayTime] as? Double {
+                    delayTime = delay
+                } else {
+                    delayTime = defaultDelay
+                }
+                
+                // Create optimized frame
+                guard let frameImage = CGImageSourceCreateImageAtIndex(imageSource, i, options as CFDictionary) else {
+                    return
+                }
+                
+                // Prepare frame properties for destination
+                let destFrameProperties: [CFString: Any] = [
+                    kCGImagePropertyGIFDictionary: [
+                        kCGImagePropertyGIFDelayTime: delayTime
                     ]
-                    
-                    for i in 0..<frameCount {
-                        autoreleasepool {
-                            guard let frameProperties = CGImageSourceCopyPropertiesAtIndex(imageSource, i, nil) else {
-                                return
-                            }
-                            
-                            // Extract GIF-specific properties
-                            let gifProperties = (frameProperties as Dictionary)[kCGImagePropertyGIFDictionary] as? Dictionary<CFString, Any>
-                            
-                            // Get delay time for the frame
-                            let defaultDelay = 0.1
-                            let delayTime: Double
-                            if let delay = gifProperties?[kCGImagePropertyGIFDelayTime] as? Double {
-                                delayTime = delay
-                            } else {
-                                delayTime = defaultDelay
-                            }
-                            
-                            // Create optimized frame
-                            guard let frameImage = CGImageSourceCreateImageAtIndex(imageSource, i, options as CFDictionary) else {
-                                return
-                            }
-                            
-                            // Prepare frame properties for destination
-                            let destFrameProperties: [CFString: Any] = [
-                                kCGImagePropertyGIFDictionary: [
-                                    kCGImagePropertyGIFDelayTime: delayTime
-                                ]
-                            ]
-                            
-                            CGImageDestinationAddImage(destination, frameImage, destFrameProperties as CFDictionary)
-                        }
-                        
-                        DispatchQueue.main.async {
-                            self.progress = Double(i + 1) / Double(frameCount)
-                        }
-                    }
-                    
-                    if !CGImageDestinationFinalize(destination) {
-                        throw CompressionError.compressionFailed
-                    }
-                }
+                ]
                 
-                // MARK: - Metadata Handling
-                private func extractMetadata(from imageSource: CGImageSource) -> [CFString: Any]? {
-                    guard let properties = CGImageSourceCopyProperties(imageSource, nil) as? [CFString: Any] else {
-                        return nil
-                    }
-                    
-                    var metadata: [CFString: Any] = [:]
-                    
-                    // Extract relevant metadata while excluding unnecessary data
-                    let keysToPreserve: [CFString] = [
-                        kCGImagePropertyOrientation,
-                        kCGImagePropertyDPIHeight,
-                        kCGImagePropertyDPIWidth,
-                        kCGImagePropertyPixelHeight,
-                        kCGImagePropertyPixelWidth,
-                        kCGImagePropertyProfileName
-                    ]
-                    
-                    for key in keysToPreserve {
-                        if let value = properties[key] {
-                            metadata[key] = value
-                        }
-                    }
-                    
-                    return metadata
-                }
-                
-                // MARK: - Quality and Optimization
-                private func determineOptimalSettings(for image: NSImage, format: NSBitmapImageRep.FileType) -> CompressionSettings {
-                    let size = image.size
-                    let totalPixels = size.width * size.height
-                    
-                    // Base settings
-                    var settings = CompressionSettings()
-                    
-                    // Adjust quality based on image size
-                    if totalPixels > 4_000_000 { // 2000x2000 pixels
-                        settings.maxDimension = 2048
-                        settings.quality = 0.7
-                    } else if totalPixels > 1_000_000 { // 1000x1000 pixels
-                        settings.maxDimension = 1500
-                        settings.quality = 0.8
-                    } else {
-                        settings.maxDimension = nil
-                        settings.quality = 0.9
-                    }
-                    
-                    // Format-specific adjustments
-                    switch format {
-                    case .jpeg:
-                        // JPEG-specific optimizations
-                        if totalPixels > 8_000_000 {
-                            settings.quality = 0.6
-                        }
-                        settings.preserveMetadata = true
-                        
-                    case .png:
-                        // PNG-specific optimizations
-                        if imageHasAlpha(image) {
-                            settings.pngCompressionLevel = 7
-                        } else {
-                            settings.pngCompressionLevel = 9
-                        }
-                        settings.preserveMetadata = true
-                        
-                    default:
-                        settings.preserveMetadata = false
-                    }
-                    
-                    return settings
-                }
-                
-                // MARK: - Progress Tracking
-                private func updateProgress(_ progress: Double) {
-                    DispatchQueue.main.async {
-                        self.progress = min(max(progress, 0), 1)
-                    }
+                CGImageDestinationAddImage(destination, frameImage, destFrameProperties as CFDictionary)
+            }
+            
+            DispatchQueue.main.async {
+                self.progress = Double(i + 1) / Double(frameCount)
+            }
+        }
+        
+        if !CGImageDestinationFinalize(destination) {
+            throw CompressionError.compressionFailed
+        }
+    }
+    
+    // MARK: - Metadata Handling
+    private func extractMetadata(from imageSource: CGImageSource) -> [CFString: Any]? {
+        guard let properties = CGImageSourceCopyProperties(imageSource, nil) as? [CFString: Any] else {
+            return nil
+        }
+        
+        var metadata: [CFString: Any] = [:]
+        
+        // Extract relevant metadata while excluding unnecessary data
+        let keysToPreserve: [CFString] = [
+            kCGImagePropertyOrientation,
+            kCGImagePropertyDPIHeight,
+            kCGImagePropertyDPIWidth,
+            kCGImagePropertyPixelHeight,
+            kCGImagePropertyPixelWidth,
+            kCGImagePropertyProfileName
+        ]
+        
+        for key in keysToPreserve {
+            if let value = properties[key] {
+                metadata[key] = value
+            }
+        }
+        
+        return metadata
+    }
+    
+    // MARK: - Quality and Optimization
+    private func determineOptimalSettings(for image: NSImage, format: NSBitmapImageRep.FileType) -> CompressionSettings {
+        let size = image.size
+        let totalPixels = size.width * size.height
+        
+        // Base settings
+        var settings = CompressionSettings()
+        
+        // Adjust quality based on image size
+        if totalPixels > 4_000_000 { // 2000x2000 pixels
+            settings.maxDimension = 2048
+            settings.quality = 0.7
+        } else if totalPixels > 1_000_000 { // 1000x1000 pixels
+            settings.maxDimension = 1500
+            settings.quality = 0.8
+        } else {
+            settings.maxDimension = nil
+            settings.quality = 0.9
+        }
+        
+        // Format-specific adjustments
+        switch format {
+        case .jpeg:
+            // JPEG-specific optimizations
+            if totalPixels > 8_000_000 {
+                settings.quality = 0.6
+            }
+            settings.preserveMetadata = true
+            
+        case .png:
+            // PNG-specific optimizations
+            if imageHasAlpha(image) {
+                settings.pngCompressionLevel = 7
+            } else {
+                settings.pngCompressionLevel = 9
+            }
+            settings.preserveMetadata = true
+            
+        default:
+            settings.preserveMetadata = false
+        }
+        
+        return settings
+    }
+    
+    // MARK: - Progress Tracking
+    private func updateProgress(_ progress: Double) {
+        DispatchQueue.main.async {
+            self.progress = min(max(progress, 0), 1)
+        }
+    }
+}
+    
+    // MARK: - Extensions
+    extension FileProcessor {
+        enum FileType {
+            case pdf
+            case jpeg
+            case png
+            case heic
+            case gif
+            case tiff
+            case bmp
+            case webp
+            case svg
+            case raw
+            case ico
+            case mp4
+            case mov
+            case avi
+            case mpeg2
+            case quickTime
+            case unknown
+            
+            init(url: URL) {
+                switch url.pathExtension.lowercased() {
+                case "pdf": self = .pdf
+                case "jpg", "jpeg": self = .jpeg
+                case "png": self = .png
+                case "heic": self = .heic
+                case "gif": self = .gif
+                case "tiff", "tif": self = .tiff
+                case "bmp": self = .bmp
+                case "webp": self = .webp
+                case "svg": self = .svg
+                case "raw", "cr2", "nef", "arw": self = .raw
+                case "ico": self = .ico
+                case "mp4": self = .mp4
+                case "mov": self = .mov
+                case "avi": self = .avi
+                case "mpg", "mpeg": self = .mpeg2
+                case "qt": self = .quickTime
+                default: self = .unknown
                 }
             }
-
-            // MARK: - Extensions
-            extension FileProcessor {
-                enum FileType {
-                    case pdf
-                    case jpeg
-                    case png
-                    case heic
-                    case gif
-                    case tiff
-                    case bmp
-                    case webp
-                    case unknown
-                    
-                    init(url: URL) {
-                        switch url.pathExtension.lowercased() {
-                        case "pdf": self = .pdf
-                        case "jpg", "jpeg": self = .jpeg
-                        case "png": self = .png
-                        case "heic": self = .heic
-                        case "gif": self = .gif
-                        case "tiff", "tif": self = .tiff
-                        case "bmp": self = .bmp
-                        case "webp": self = .webp
-                        default: self = .unknown
-                        }
-                    }
-                    
-                    var canCompress: Bool {
-                        self != .unknown
-                    }
-                    
-                    var defaultOutputExtension: String {
-                        switch self {
-                        case .pdf: return "pdf"
-                        case .jpeg: return "jpg"
-                        case .png: return "png"
-                        case .heic: return "jpg"  // Convert HEIC to JPEG
-                        case .gif: return "gif"
-                        case .tiff: return "jpg"  // Convert TIFF to JPEG
-                        case .bmp: return "png"   // Convert BMP to PNG
-                        case .webp: return "jpg"  // Convert WebP to JPEG
-                        case .unknown: return ""
-                        }
-                    }
+            
+            var isVideo: Bool {
+                switch self {
+                case .mp4, .mov, .avi, .mpeg2, .quickTime:
+                    return true
+                default:
+                    return false
                 }
             }
+            
+            var defaultOutputExtension: String {
+                switch self {
+                case .pdf: return "pdf"
+                case .jpeg: return "jpg"
+                case .png: return "png"
+                case .heic: return "jpg"
+                case .gif: return "gif"
+                case .tiff: return "jpg"
+                case .bmp: return "png"
+                case .webp: return "jpg"
+                case .svg: return "svg"
+                case .raw: return "jpg"
+                case .ico: return "png"
+                case .mp4, .mov, .avi, .mpeg2, .quickTime: return "mp4"
+                case .unknown: return ""
+                }
+            }
+        }
+    }
