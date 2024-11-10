@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct ResultView: View {
-    let result: PDFProcessor.ProcessingResult
+    let result: FileProcessor.ProcessingResult
     let onDownload: () -> Void
     let onReset: () -> Void
     

@@ -3,10 +3,21 @@ import UniformTypeIdentifiers
 import AppKit
 
 struct ContentView: View {
-    @StateObject private var pdfProcessor = PDFProcessor()
+    @StateObject private var processor = FileProcessor()
     @State private var isDragging = false
     @State private var showAlert = false
     @State private var alertMessage = ""
+    
+    let supportedTypes: [UTType] = [
+        .pdf,      // PDF Documents
+        .jpeg,     // JPEG Images
+        .tiff,     // TIFF Images
+        .png,      // PNG Images
+        .heic,     // HEIC Images
+        .gif,      // GIF Images
+        .bmp,      // BMP Images
+        .webP      // WebP Images
+    ]
     
     var body: some View {
         ZStack {
@@ -14,7 +25,7 @@ struct ContentView: View {
                 .ignoresSafeArea()
             
             VStack(spacing: 20) {
-                if pdfProcessor.isProcessing {
+                if processor.isProcessing {
                     VStack(spacing: 24) {
                         // Progress Circle
                         ZStack {
@@ -23,17 +34,17 @@ struct ContentView: View {
                                 .frame(width: 60, height: 60)
                             
                             Circle()
-                                .trim(from: 0, to: pdfProcessor.progress)
+                                .trim(from: 0, to: processor.progress)
                                 .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 4, lineCap: .round))
                                 .frame(width: 60, height: 60)
                                 .rotationEffect(.degrees(-90))
                             
-                            Text("\(Int(pdfProcessor.progress * 100))%")
+                            Text("\(Int(processor.progress * 100))%")
                                 .font(.system(size: 14, weight: .medium))
                         }
                         
                         VStack(spacing: 8) {
-                            Text("Compressing PDF")
+                            Text("Compressing File")
                                 .font(.system(size: 16, weight: .semibold))
                             Text("This may take a moment...")
                                 .font(.system(size: 14))
@@ -48,13 +59,13 @@ struct ContentView: View {
                             .opacity(0.8)
                             .shadow(color: Color.black.opacity(0.1), radius: 20, x: 0, y: 10)
                     )
-                } else if let result = pdfProcessor.processingResult {
+                } else if let result = processor.processingResult {
                     ResultView(result: result) {
                         Task {
                             await saveCompressedFile(url: result.compressedURL, originalName: result.fileName)
                         }
                     } onReset: {
-                        pdfProcessor.cleanup()
+                        processor.cleanup()
                     }
                 } else {
                     ZStack {
@@ -64,7 +75,7 @@ struct ContentView: View {
                             .fill(Color.clear)
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                             .overlay(isDragging ? Color.accentColor.opacity(0.2) : Color.clear)
-                            .onDrop(of: [.pdf], isTargeted: $isDragging) { providers in
+                            .onDrop(of: supportedTypes, isTargeted: $isDragging) { providers in
                                 handleDrop(providers: providers)
                                 return true
                             }
@@ -82,56 +93,61 @@ struct ContentView: View {
     }
     
     private func handleDrop(providers: [NSItemProvider]) {
-        guard let provider = providers.first else { return }
-        
-        provider.loadFileRepresentation(forTypeIdentifier: UTType.pdf.identifier) { url, error in
-            guard let url = url else {
-                DispatchQueue.main.async {
-                    self.alertMessage = "Failed to load PDF file"
-                    self.showAlert = true
-                }
-                return
-            }
+            guard let provider = providers.first else { return }
             
-            // Create a copy in temporary directory
-            let tempURL = FileManager.default.temporaryDirectory
-                .appendingPathComponent(UUID().uuidString)
-                .appendingPathExtension("pdf")
-            
-            do {
-                try FileManager.default.copyItem(at: url, to: tempURL)
-                
-                DispatchQueue.main.async {
-                    self.handlePDFSelection(url: tempURL)
-                }
-            } catch {
-                DispatchQueue.main.async {
-                    self.alertMessage = "Failed to process dropped file"
-                    self.showAlert = true
+            // Try each supported type
+            for type in supportedTypes {
+                if provider.hasItemConformingToTypeIdentifier(type.identifier) {
+                    provider.loadFileRepresentation(forTypeIdentifier: type.identifier) { url, error in
+                        guard let url = url else {
+                            DispatchQueue.main.async {
+                                self.alertMessage = "Failed to load file"
+                                self.showAlert = true
+                            }
+                            return
+                        }
+                        
+                        // Create a copy in temporary directory
+                        let tempURL = FileManager.default.temporaryDirectory
+                            .appendingPathComponent(UUID().uuidString)
+                            .appendingPathExtension(url.pathExtension)
+                        
+                        do {
+                            try FileManager.default.copyItem(at: url, to: tempURL)
+                            
+                            DispatchQueue.main.async {
+                                self.handleFileSelection(url: tempURL)
+                            }
+                        } catch {
+                            DispatchQueue.main.async {
+                                self.alertMessage = "Failed to process dropped file"
+                                self.showAlert = true
+                            }
+                        }
+                    }
+                    return
                 }
             }
         }
-    }
-    
     
     private func selectFile() {
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.pdf]
-        panel.allowsMultipleSelection = false
-        
-        if let window = NSApp.windows.first {
-            panel.beginSheetModal(for: window) { response in
-                if response == .OK, let url = panel.url {
-                    handlePDFSelection(url: url)
+            let panel = NSOpenPanel()
+            panel.allowedContentTypes = supportedTypes
+            panel.allowsMultipleSelection = false
+            
+            if let window = NSApp.windows.first {
+                panel.beginSheetModal(for: window) { response in
+                    if response == .OK, let url = panel.url {
+                        handleFileSelection(url: url)
+                    }
                 }
             }
-        }
     }
     
-    private func handlePDFSelection(url: URL) {
+    private func handleFileSelection(url: URL) {
         Task {
             do {
-                try await pdfProcessor.processPDF(url: url)
+                try await processor.processFile(url: url)
             } catch {
                 await MainActor.run {
                     alertMessage = error.localizedDescription
@@ -141,15 +157,14 @@ struct ContentView: View {
         }
     }
     
-    
     @MainActor
     private func saveCompressedFile(url: URL, originalName: String) async {
         let panel = NSSavePanel()
         panel.canCreateDirectories = true
         panel.showsTagField = false
         panel.nameFieldStringValue = "compressed_" + originalName
-        panel.allowedContentTypes = [.pdf]
-        panel.message = "Choose where to save the compressed PDF"
+        panel.allowedContentTypes = [UTType(filenameExtension: url.pathExtension)].compactMap { $0 }
+        panel.message = "Choose where to save the compressed file"
         
         guard let window = NSApp.windows.first else { return }
         
@@ -159,7 +174,7 @@ struct ContentView: View {
             if response == .OK, let saveURL = panel.url {
                 do {
                     try FileManager.default.copyItem(at: url, to: saveURL)
-                    pdfProcessor.cleanup()
+                    processor.cleanup()
                 } catch {
                     alertMessage = "Failed to save file: \(error.localizedDescription)"
                     showAlert = true
@@ -171,5 +186,3 @@ struct ContentView: View {
         }
     }
 }
-
-

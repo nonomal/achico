@@ -1,15 +1,16 @@
+// CacheManager.swift
 import Foundation
-import AppKit  // Add this for NSApplication
+import AppKit
 
-class PDFCacheManager {
-    static let shared = PDFCacheManager()
+class CacheManager {
+    static let shared = CacheManager()
     
     private let cacheDirectory: URL
     private let maxCacheAge: TimeInterval = 24 * 60 * 60 // 24 hours
     
     private init() {
         let cacheDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
-        cacheDirectory = cacheDir.appendingPathComponent("com.achico.pdfcache", isDirectory: true)
+        cacheDirectory = cacheDir.appendingPathComponent("com.achico.filecache", isDirectory: true)
         
         do {
             try FileManager.default.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)

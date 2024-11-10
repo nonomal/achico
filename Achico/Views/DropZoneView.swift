@@ -1,4 +1,5 @@
 import SwiftUI
+
 struct DropZoneView: View {
     @Binding var isDragging: Bool
     let onTap: () -> Void
@@ -10,7 +11,7 @@ struct DropZoneView: View {
                     .font(.system(size: 32))
                     .foregroundColor(.secondary)
                 
-                Text("Drop PDF here")
+                Text("Drop your file here")
                     .font(.system(size: 14))
                     .foregroundColor(.secondary)
             }
