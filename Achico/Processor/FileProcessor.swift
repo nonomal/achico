@@ -47,14 +47,7 @@ class FileProcessor: ObservableObject {
             return max(0, percentage)
         }
     }
-    
-    struct CompressionSettings {
-        var quality: CGFloat = 0.7        // JPEG/HEIC quality (0.0-1.0)
-        var pngCompressionLevel: Int = 6  // PNG compression (0-9)
-        var preserveMetadata: Bool = false
-        var maxDimension: CGFloat? = nil  // Downsample if larger
-        var optimizeForWeb: Bool = true   // Additional optimizations for web use
-    }
+
     
     // MARK: - Lifecycle
     deinit {
@@ -63,7 +56,7 @@ class FileProcessor: ObservableObject {
     
     // MARK: - Public Methods
     @MainActor
-    func processFile(url: URL) async throws {
+    func processFile(url: URL, settings: CompressionSettings? = nil) async throws {
         isProcessing = true
         progress = 0
         processingResult = nil
@@ -72,7 +65,7 @@ class FileProcessor: ObservableObject {
             let result = try await withCheckedThrowingContinuation { continuation in
                 processingQueue.async {
                     do {
-                        let result = try self.processInBackground(url: url)
+                        let result = try self.processInBackground(url: url, settings: settings)
                         DispatchQueue.main.async {
                             continuation.resume(returning: result)
                         }
@@ -101,27 +94,31 @@ class FileProcessor: ObservableObject {
     }
     
     // MARK: - Private Methods - Main Processing
-    private func processInBackground(url: URL) throws -> ProcessingResult {
-        let originalSize = try FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int64 ?? 0
-        let tempURL = try cacheManager.createTemporaryURL(for: url.lastPathComponent)
+    private func processInBackground(url: URL, settings: CompressionSettings? = nil) throws -> ProcessingResult {
+        print("Debug - Processing with settings:", settings ?? "default")  // Debug log
+           let originalSize = try FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int64 ?? 0
+           let tempURL = try cacheManager.createTemporaryURL(for: url.lastPathComponent)
+           
+           let compressionSettings = settings ?? CompressionSettings()
+           print("Debug - Max dimension:", compressionSettings.maxDimension ?? "not set")  
         
         switch url.pathExtension.lowercased() {
         case "pdf":
             try processPDF(from: url, to: tempURL)
         case "jpg", "jpeg":
-            try processJPEG(from: url, to: tempURL)
+            try processJPEG(from: url, to: tempURL, settings: compressionSettings)
         case "png":
-            try processPNG(from: url, to: tempURL)
+            try processPNG(from: url, to: tempURL, settings: compressionSettings)
         case "heic":
-            try processHEIC(from: url, to: tempURL)
+            try processHEIC(from: url, to: tempURL, settings: compressionSettings)
         case "tiff", "tif":
-            try processTIFF(from: url, to: tempURL)
+            try processTIFF(from: url, to: tempURL, settings: compressionSettings)
         case "gif":
             try processGIF(from: url, to: tempURL)
         case "bmp":
-            try processBMP(from: url, to: tempURL)
+            try processBMP(from: url, to: tempURL, settings: compressionSettings)
         case "webp":
-            try processWebP(from: url, to: tempURL)
+            try processWebP(from: url, to: tempURL, settings: compressionSettings)
         default:
             throw CompressionError.unsupportedFormat
         }
@@ -164,17 +161,10 @@ class FileProcessor: ObservableObject {
         newDocument.write(to: tempURL)
     }
     
-    private func processJPEG(from url: URL, to tempURL: URL) throws {
+    private func processJPEG(from url: URL, to tempURL: URL, settings: CompressionSettings) throws {
         guard let image = NSImage(contentsOf: url) else {
             throw CompressionError.conversionFailed
         }
-        
-        let settings = CompressionSettings(
-            quality: 0.7,
-            preserveMetadata: true,
-            maxDimension: 2048,
-            optimizeForWeb: true
-        )
         
         guard let compressedData = compressImage(image, format: .jpeg, settings: settings) else {
             throw CompressionError.compressionFailed
@@ -183,17 +173,10 @@ class FileProcessor: ObservableObject {
         try compressedData.write(to: tempURL)
     }
     
-    private func processPNG(from url: URL, to tempURL: URL) throws {
+    private func processPNG(from url: URL, to tempURL: URL, settings: CompressionSettings) throws {
         guard let image = NSImage(contentsOf: url) else {
             throw CompressionError.conversionFailed
         }
-        
-        let settings = CompressionSettings(
-            pngCompressionLevel: 6,
-            preserveMetadata: true,
-            maxDimension: 2048,
-            optimizeForWeb: true
-        )
         
         guard let compressedData = compressImage(image, format: .png, settings: settings) else {
             throw CompressionError.compressionFailed
@@ -202,17 +185,10 @@ class FileProcessor: ObservableObject {
         try compressedData.write(to: tempURL)
     }
     
-    private func processHEIC(from url: URL, to tempURL: URL) throws {
+    private func processHEIC(from url: URL, to tempURL: URL, settings: CompressionSettings) throws {
         guard let image = NSImage(contentsOf: url) else {
             throw CompressionError.conversionFailed
         }
-        
-        let settings = CompressionSettings(
-            quality: 0.8,
-            preserveMetadata: true,
-            maxDimension: 2048,
-            optimizeForWeb: true
-        )
         
         guard let compressedData = compressImage(image, format: .jpeg, settings: settings) else {
             throw CompressionError.compressionFailed
@@ -222,17 +198,10 @@ class FileProcessor: ObservableObject {
         try compressedData.write(to: jpegURL)
     }
     
-    private func processTIFF(from url: URL, to tempURL: URL) throws {
+    private func processTIFF(from url: URL, to tempURL: URL, settings: CompressionSettings) throws {
         guard let image = NSImage(contentsOf: url) else {
             throw CompressionError.conversionFailed
         }
-        
-        let settings = CompressionSettings(
-            quality: 0.8,
-            preserveMetadata: true,
-            maxDimension: 2048,
-            optimizeForWeb: true
-        )
         
         guard let compressedData = compressImage(image, format: .jpeg, settings: settings) else {
             throw CompressionError.compressionFailed
@@ -271,17 +240,10 @@ class FileProcessor: ObservableObject {
         }
     }
     
-    private func processBMP(from url: URL, to tempURL: URL) throws {
+    private func processBMP(from url: URL, to tempURL: URL, settings: CompressionSettings) throws {
         guard let image = NSImage(contentsOf: url) else {
             throw CompressionError.conversionFailed
         }
-        
-        let settings = CompressionSettings(
-            pngCompressionLevel: 6,
-            preserveMetadata: false,
-            maxDimension: 2048,
-            optimizeForWeb: true
-        )
         
         guard let compressedData = compressImage(image, format: .png, settings: settings) else {
             throw CompressionError.compressionFailed
@@ -291,20 +253,13 @@ class FileProcessor: ObservableObject {
         try compressedData.write(to: pngURL)
     }
     
-    private func processWebP(from url: URL, to tempURL: URL) throws {
+    private func processWebP(from url: URL, to tempURL: URL, settings: CompressionSettings) throws {
         guard let image = NSImage(contentsOf: url) else {
             throw CompressionError.conversionFailed
         }
         
         let hasAlpha = imageHasAlpha(image)
         let format: NSBitmapImageRep.FileType = hasAlpha ? .png : .jpeg
-        let settings = CompressionSettings(
-            quality: 0.8,
-            pngCompressionLevel: 6,
-            preserveMetadata: true,
-            maxDimension: 2048,
-            optimizeForWeb: true
-        )
         
         guard let compressedData = compressImage(image, format: format, settings: settings) else {
             throw CompressionError.compressionFailed
@@ -340,26 +295,37 @@ class FileProcessor: ObservableObject {
     }
     
     private func compressImage(_ image: NSImage, format: NSBitmapImageRep.FileType, settings: CompressionSettings) -> Data? {
+        print("Debug - Original image size: \(image.size.width) x \(image.size.height)")
         guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+            print("Debug - Failed to get CGImage")
             return nil
         }
         
         let processedCGImage: CGImage
         if let maxDimension = settings.maxDimension {
-            processedCGImage = resizeImage(cgImage, maxDimension: maxDimension) ?? cgImage
+            print("Debug - Attempting resize to max dimension: \(maxDimension)")
+            if let resized = resizeImage(cgImage, maxDimension: maxDimension) {
+                processedCGImage = resized
+                print("Debug - Resized successfully")
+            } else {
+                print("Debug - Resize failed, using original")
+                processedCGImage = cgImage
+            }
         } else {
+            print("Debug - No resize requested")
             processedCGImage = cgImage
         }
         
         let bitmapRep = NSBitmapImageRep(cgImage: processedCGImage)
-        
+        print("Debug - Final image size: \(bitmapRep.size.width) x \(bitmapRep.size.height)")
+
         var compressionProperties: [NSBitmapImageRep.PropertyKey: Any] = [:]
         
         switch format {
         case .jpeg:
             compressionProperties[.compressionFactor] = settings.quality
         case .png:
-            break
+            compressionProperties[.compressionFactor] = 1.0
         default:
             break
         }
@@ -380,30 +346,53 @@ class FileProcessor: ObservableObject {
         let currentWidth = CGFloat(cgImage.width)
         let currentHeight = CGFloat(cgImage.height)
         
-        let scale = min(maxDimension / currentWidth, maxDimension / currentHeight)
-        if scale >= 1.0 {
+        // Calculate scale factor to maintain aspect ratio
+        let scaleFactor = min(maxDimension / currentWidth, maxDimension / currentHeight)
+        
+        // Only resize if the image is larger than maxDimension
+        if scaleFactor >= 1.0 {
             return cgImage
         }
         
-        let newWidth = currentWidth * scale
-        let newHeight = currentHeight * scale
-        let newSize = CGSize(width: newWidth, height: newHeight)
+        let newWidth = Int(currentWidth * scaleFactor)
+        let newHeight = Int(currentHeight * scaleFactor)
         
-        guard let colorSpace = cgImage.colorSpace else { return nil }
+        // Create a bitmap context with the proper color space and bitmap info
+        let bitmapInfo: UInt32
+        if cgImage.alphaInfo == .none {
+            bitmapInfo = CGImageAlphaInfo.noneSkipLast.rawValue
+        } else {
+            bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue
+        }
+        
         guard let context = CGContext(
             data: nil,
-            width: Int(newWidth),
-            height: Int(newHeight),
-            bitsPerComponent: cgImage.bitsPerComponent,
+            width: newWidth,
+            height: newHeight,
+            bitsPerComponent: 8,
             bytesPerRow: 0,
-            space: colorSpace,
-            bitmapInfo: cgImage.bitmapInfo.rawValue
-        ) else { return nil }
+            space: CGColorSpace(name: CGColorSpace.sRGB)!,
+            bitmapInfo: bitmapInfo
+        ) else {
+            print("Debug - Failed to create context")
+            return nil
+        }
         
+        // Set high quality image interpolation
         context.interpolationQuality = .high
-        context.draw(cgImage, in: CGRect(origin: .zero, size: newSize))
         
-        return context.makeImage()
+        // Draw the image in the new size
+        let newRect = CGRect(x: 0, y: 0, width: newWidth, height: newHeight)
+        context.draw(cgImage, in: newRect)
+        
+        // Get the resized image
+        guard let resizedImage = context.makeImage() else {
+            print("Debug - Failed to create resized image")
+            return nil
+        }
+        
+        print("Debug - Successfully resized image to \(newWidth) x \(newHeight)")
+        return resizedImage
     }
     
     private func compressAnimatedGIF(_ imageSource: CGImageSource, frameCount: Int, to url: URL) throws {

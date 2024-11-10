@@ -7,6 +7,8 @@ struct ContentView: View {
     @State private var isDragging = false
     @State private var showAlert = false
     @State private var alertMessage = ""
+    @State private var shouldResize = false
+    @State private var maxDimension = "2048"
     
     let supportedTypes: [UTType] = [
         .pdf,      // PDF Documents
@@ -68,19 +70,24 @@ struct ContentView: View {
                         processor.cleanup()
                     }
                 } else {
-                    ZStack {
-                        DropZoneView(isDragging: $isDragging, onTap: selectFile)
-                        
-                        Rectangle()
-                            .fill(Color.clear)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .overlay(isDragging ? Color.accentColor.opacity(0.2) : Color.clear)
-                            .onDrop(of: supportedTypes, isTargeted: $isDragging) { providers in
-                                handleDrop(providers: providers)
-                                return true
-                            }
+                        ZStack {
+                            DropZoneView(
+                                isDragging: $isDragging,
+                                shouldResize: $shouldResize,
+                                maxDimension: $maxDimension,
+                                onTap: selectFile
+                            )
+                            
+                            Rectangle()
+                                .fill(Color.clear)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                .overlay(isDragging ? Color.accentColor.opacity(0.2) : Color.clear)
+                                .onDrop(of: supportedTypes, isTargeted: $isDragging) { providers in
+                                    handleDrop(providers: providers)
+                                    return true
+                                }
+                        }
                     }
-                }
             }
             .padding()
         }
@@ -147,7 +154,18 @@ struct ContentView: View {
     private func handleFileSelection(url: URL) {
         Task {
             do {
-                try await processor.processFile(url: url)
+                let dimensionValue = shouldResize ? Double(maxDimension) ?? 2048 : nil
+                print("Debug - Selected max dimension:", dimensionValue ?? "nil")
+                
+                let settings = CompressionSettings(
+                    quality: 0.7,
+                    pngCompressionLevel: 6,
+                    preserveMetadata: true,
+                    maxDimension: dimensionValue != nil ? CGFloat(dimensionValue!) : nil,
+                    optimizeForWeb: true
+                )
+                
+                try await processor.processFile(url: url, settings: settings)
             } catch {
                 await MainActor.run {
                     alertMessage = error.localizedDescription
