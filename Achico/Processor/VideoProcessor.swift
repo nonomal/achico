@@ -54,7 +54,6 @@ actor VideoProcessor {
         
         // Get original dimensions and apply size limit if needed
         let originalSize = try await videoTrack.load(.naturalSize)
-        let originalTransform = try await videoTrack.load(.preferredTransform)
         var targetSize = originalSize
         
         if let maxWidth = settings.maxWidth {
@@ -110,7 +109,18 @@ actor VideoProcessor {
         )
         
         let layerInstruction = AVMutableVideoCompositionLayerInstruction(assetTrack: videoTrack)
-        layerInstruction.setTransform(originalTransform, at: .zero)
+        
+        // Calculate transform for proper resizing
+        let originalTransform = try await videoTrack.load(.preferredTransform)
+        var finalTransform = originalTransform
+        
+        let scaleX = targetSize.width / originalSize.width
+        let scaleY = targetSize.height / originalSize.height
+        
+        // Apply scaling transform
+        finalTransform = finalTransform.concatenating(CGAffineTransform(scaleX: scaleX, y: scaleY))
+        
+        layerInstruction.setTransform(finalTransform, at: .zero)
         instruction.layerInstructions = [layerInstruction]
         composition.instructions = [instruction]
         
