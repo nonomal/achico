@@ -42,8 +42,6 @@ Download from the [releases](https://github.com/nuance-dev/Achico/releases/) pag
 6. Update, from v2 onwards you can resize your files!
 ![42630](https://github.com/user-attachments/assets/6def2137-fd12-4f7d-b59a-4476ae506331)
 
-![38565](https://github.com/user-attachments/assets/22dde098-e236-4f6e-8c18-262bdae699d6)
-
 
 ## 🛠 Technical Details
 
