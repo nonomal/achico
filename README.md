@@ -10,6 +10,7 @@ A lightweight, native macOS app that intelligently compresses files while mainta
 - **PDFs**: Smart compression while preserving readability
 - **Images**: Support for JPEG, PNG, HEIC, TIFF, GIF, BMP, WebP, SVG, RAW, and ICO
 - **Videos**: MP4, MOV, AVI, and other common formats
+- **Audio**: M4V, WAV, MP3, AIFF
 - **File Resizing**: Optionally resize images and videos while compressing
 
 ### Core Features
