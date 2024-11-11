@@ -13,6 +13,7 @@ struct AchicoApp: App {
             ContentView()
                 .frame(minWidth: 400, minHeight: 500)
                 .preferredColorScheme(isDarkMode ? .dark : .light)
+                .background(WindowAccessor())
                 .environmentObject(menuBarController)
                 .sheet(isPresented: $showingUpdateSheet) {
                     MenuBarView(updater: menuBarController.updater)
