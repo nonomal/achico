@@ -146,86 +146,88 @@ struct MultiFileView: View {
         let panel = NSSavePanel()
         panel.canCreateDirectories = true
         panel.showsTagField = false
-        panel.nameFieldStringValue = originalName + "compressed_"
+        
+        // Use the original name directly
+        let fileURL = URL(fileURLWithPath: originalName)
+        let filenameWithoutExt = fileURL.deletingPathExtension().lastPathComponent
+        let fileExtension = fileURL.pathExtension
+        panel.nameFieldStringValue = "\(filenameWithoutExt)_compressed.\(fileExtension)"
+        
         panel.allowedContentTypes = [UTType(filenameExtension: url.pathExtension)].compactMap { $0 }
         panel.message = "Choose where to save the compressed file"
         
         guard let window = NSApp.windows.first else { return }
         
-        do {
-            let response = await panel.beginSheetModal(for: window)
-            
-            if response == .OK, let saveURL = panel.url {
-                do {
-                    try FileManager.default.copyItem(at: url, to: saveURL)
-                } catch {
-                    print("Failed to save file: \(error.localizedDescription)")
-                }
+        let response = await panel.beginSheetModal(for: window)
+        
+        if response == .OK, let saveURL = panel.url {
+            do {
+                try FileManager.default.copyItem(at: url, to: saveURL)
+            } catch {
+                print("Failed to save file: \(error.localizedDescription)")
             }
-        } catch {
-            print("Failed to show save dialog")
         }
     }
-}
-
-struct FileRow: View {
-    let file: FileProcessingState
-    let onSave: () -> Void
-    let onRemove: () -> Void
     
-    var body: some View {
-        HStack(spacing: 12) {
-            // File icon
-            Image(systemName: "doc")
-                .font(.system(size: 20))
-                .foregroundColor(.secondary)
-            
-            // File name and status
-            VStack(alignment: .leading, spacing: 4) {
-                Text(file.url.lastPathComponent)
-                    .font(.system(size: 14, weight: .medium))
-                    .lineLimit(1)
+    struct FileRow: View {
+        let file: FileProcessingState
+        let onSave: () -> Void
+        let onRemove: () -> Void
+        
+        var body: some View {
+            HStack(spacing: 12) {
+                // File icon
+                Image(systemName: "doc")
+                    .font(.system(size: 20))
+                    .foregroundColor(.secondary)
                 
-                if let result = file.result {
-                    Text("Reduced by \(result.savedPercentage)%")
-                        .font(.system(size: 12))
-                        .foregroundColor(.secondary)
-                } else if let error = file.error {
-                    Text(error.localizedDescription)
-                        .font(.system(size: 12))
-                        .foregroundColor(.red)
-                } else if file.isProcessing {
-                    Text("Processing...")
-                        .font(.system(size: 12))
-                        .foregroundColor(.secondary)
+                // File name and status
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(file.url.lastPathComponent)  // Show original filename
+                        .font(.system(size: 14, weight: .medium))
+                        .lineLimit(1)
+                    
+                    if let result = file.result {
+                        Text("Reduced by \(result.savedPercentage)%")
+                            .font(.system(size: 12))
+                            .foregroundColor(.secondary)
+                    } else if let error = file.error {
+                        Text(error.localizedDescription)
+                            .font(.system(size: 12))
+                            .foregroundColor(.red)
+                    } else if file.isProcessing {
+                        Text("Processing...")
+                            .font(.system(size: 12))
+                            .foregroundColor(.secondary)
+                    }
                 }
-            }
-            
-            Spacer()
-            
-            // Progress or actions
-            HStack(spacing: 8) {
-                if file.isProcessing {
-                    ProgressView()
-                        .scaleEffect(0.8)
-                        .frame(width: 16, height: 16)
-                } else if let result = file.result {
-                    Button(action: onSave) {
-                        Image(systemName: "square.and.arrow.down")
+                
+                Spacer()
+                
+                // Progress or actions
+                HStack(spacing: 8) {
+                    if file.isProcessing {
+                        ProgressView()
+                            .scaleEffect(0.8)
+                            .frame(width: 16, height: 16)
+                    } else if let result = file.result {
+                        Button(action: onSave) {
+                            Image(systemName: "square.and.arrow.down")
+                                .font(.system(size: 14))
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                    }
+                    
+                    Button(action: onRemove) {
+                        Image(systemName: "xmark")
                             .font(.system(size: 14))
+                            .foregroundColor(.secondary)
                     }
                     .buttonStyle(PlainButtonStyle())
                 }
-                
-                Button(action: onRemove) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 14))
-                        .foregroundColor(.secondary)
-                }
-                .buttonStyle(PlainButtonStyle())
             }
+            .padding(.vertical, 8)
+            .padding(.horizontal, 12)
         }
-        .padding(.vertical, 8)
-        .padding(.horizontal, 12)
     }
 }

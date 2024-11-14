@@ -23,16 +23,18 @@ class CacheManager {
     }
     
     func createTemporaryURL(for filename: String) throws -> URL {
-        let uniqueFilename = "\(UUID().uuidString)_\(filename)"
-        let fileURL = cacheDirectory.appendingPathComponent(uniqueFilename)
-        
-        // Check if file already exists and remove it
-        if FileManager.default.fileExists(atPath: fileURL.path) {
-            try FileManager.default.removeItem(at: fileURL)
-        }
-        
-        return fileURL
-    }
+           // Clean the filename
+           let cleanFilename = filename.components(separatedBy: "_").last ?? filename
+           let tempFilename = "\(UUID().uuidString).\(cleanFilename)"
+           let fileURL = cacheDirectory.appendingPathComponent(tempFilename)
+           
+           // Check if file already exists and remove it
+           if FileManager.default.fileExists(atPath: fileURL.path) {
+               try FileManager.default.removeItem(at: fileURL)
+           }
+           
+           return fileURL
+       }
     
     func cleanupOldFiles() {
         let fileManager = FileManager.default

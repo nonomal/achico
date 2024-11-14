@@ -256,30 +256,29 @@ struct ContentView: View {
         let panel = NSSavePanel()
         panel.canCreateDirectories = true
         panel.showsTagField = false
-        panel.nameFieldStringValue = originalName + "_compressed"
+        
+        // Get the original file name without any UUID
+        let originalURL = URL(fileURLWithPath: originalName)
+        let filenameWithoutExt = originalURL.deletingPathExtension().lastPathComponent
+        let fileExtension = originalURL.pathExtension
+        panel.nameFieldStringValue = "\(filenameWithoutExt)_compressed.\(fileExtension)"
+        
         panel.allowedContentTypes = [UTType(filenameExtension: url.pathExtension)].compactMap { $0 }
         panel.message = "Choose where to save the compressed file"
         
         guard let window = NSApp.windows.first else { return }
         
-        do {
-            let response = await panel.beginSheetModal(for: window)
-            
-            if response == .OK, let saveURL = panel.url {
-                do {
-                    try FileManager.default.copyItem(at: url, to: saveURL)
-                    processor.cleanup()
-                } catch {
-                    await MainActor.run {
-                        alertMessage = "Failed to save file: \(error.localizedDescription)"
-                        showAlert = true
-                    }
+        let response = await panel.beginSheetModal(for: window)
+        
+        if response == .OK, let saveURL = panel.url {
+            do {
+                try FileManager.default.copyItem(at: url, to: saveURL)
+                processor.cleanup()  // Only for ContentView
+            } catch {
+                await MainActor.run {
+                    alertMessage = "Failed to save file: \(error.localizedDescription)"
+                    showAlert = true
                 }
-            }
-        } catch {
-            await MainActor.run {
-                alertMessage = "Failed to show save dialog"
-                showAlert = true
             }
         }
     }
