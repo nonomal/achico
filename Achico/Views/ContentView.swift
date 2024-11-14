@@ -4,6 +4,7 @@ import AppKit
 
 struct ContentView: View {
     @StateObject private var processor = FileProcessor()
+    @StateObject private var multiProcessor = MultiFileProcessor()
     @State private var isDragging = false
     @State private var showAlert = false
     @State private var alertMessage = ""
@@ -40,6 +41,7 @@ struct ContentView: View {
             
             VStack(spacing: 20) {
                 if processor.isProcessing {
+                    // Single file processing view
                     VStack(spacing: 24) {
                         // Progress Circle
                         ZStack {
@@ -81,25 +83,32 @@ struct ContentView: View {
                     } onReset: {
                         processor.cleanup()
                     }
+                } else if !multiProcessor.files.isEmpty {
+                    MultiFileView(
+                        processor: multiProcessor,
+                        shouldResize: $shouldResize,
+                        maxDimension: $maxDimension,
+                        supportedTypes: supportedTypes
+                    )
                 } else {
-                        ZStack {
-                            DropZoneView(
-                                isDragging: $isDragging,
-                                shouldResize: $shouldResize,
-                                maxDimension: $maxDimension,
-                                onTap: selectFile
-                            )
-                            
-                            Rectangle()
-                                .fill(Color.clear)
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                .overlay(isDragging ? Color.accentColor.opacity(0.2) : Color.clear)
-                                .onDrop(of: supportedTypes, isTargeted: $isDragging) { providers in
-                                    handleDrop(providers: providers)
-                                    return true
-                                }
-                        }
+                    ZStack {
+                        DropZoneView(
+                            isDragging: $isDragging,
+                            shouldResize: $shouldResize,
+                            maxDimension: $maxDimension,
+                            onTap: selectFiles
+                        )
+                        
+                        Rectangle()
+                            .fill(Color.clear)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .overlay(isDragging ? Color.accentColor.opacity(0.2) : Color.clear)
+                            .onDrop(of: supportedTypes, isTargeted: $isDragging) { providers in
+                                handleDrop(providers: providers)
+                                return true
+                            }
                     }
+                }
             }
             .padding()
         }
@@ -111,72 +120,128 @@ struct ContentView: View {
         }
     }
     
-    private func handleDrop(providers: [NSItemProvider]) {
-            guard let provider = providers.first else { return }
-            
-            // Try each supported type
-            for type in supportedTypes {
-                if provider.hasItemConformingToTypeIdentifier(type.identifier) {
-                    provider.loadFileRepresentation(forTypeIdentifier: type.identifier) { url, error in
-                        guard let url = url else {
-                            DispatchQueue.main.async {
-                                self.alertMessage = "Failed to load file"
-                                self.showAlert = true
-                            }
-                            return
-                        }
-                        
-                        // Create a copy in temporary directory
-                        let tempURL = FileManager.default.temporaryDirectory
-                            .appendingPathComponent(UUID().uuidString)
-                            .appendingPathExtension(url.pathExtension)
-                        
-                        do {
-                            try FileManager.default.copyItem(at: url, to: tempURL)
-                            
-                            DispatchQueue.main.async {
-                                self.handleFileSelection(url: tempURL)
-                            }
-                        } catch {
-                            DispatchQueue.main.async {
-                                self.alertMessage = "Failed to process dropped file"
-                                self.showAlert = true
-                            }
+    private func selectFiles() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = supportedTypes
+        panel.allowsMultipleSelection = true
+        
+        if let window = NSApp.windows.first {
+            panel.beginSheetModal(for: window) { response in
+                if response == .OK {
+                    if panel.urls.count == 1, let url = panel.urls.first {
+                        handleFileSelection(url: url)
+                    } else if panel.urls.count > 1 {
+                        Task { @MainActor in
+                            multiProcessor.addFiles(panel.urls)
                         }
                     }
-                    return
                 }
             }
         }
+    }
     
-    private func selectFile() {
-            let panel = NSOpenPanel()
-            panel.allowedContentTypes = supportedTypes
-            panel.allowsMultipleSelection = false
+    private func handleDrop(providers: [NSItemProvider]) {
+        if providers.count == 1 {
+            guard let provider = providers.first else { return }
+            handleSingleFileDrop(provider: provider)
+        } else {
+            handleMultiFileDrop(providers: providers)
+        }
+    }
+    
+    private func handleSingleFileDrop(provider: NSItemProvider) {
+        for type in supportedTypes {
+            if provider.hasItemConformingToTypeIdentifier(type.identifier) {
+                provider.loadFileRepresentation(forTypeIdentifier: type.identifier) { url, error in
+                    guard let url = url else {
+                        Task { @MainActor in
+                            alertMessage = "Failed to load file"
+                            showAlert = true
+                        }
+                        return
+                    }
+                    
+                    let tempURL = FileManager.default.temporaryDirectory
+                        .appendingPathComponent(UUID().uuidString)
+                        .appendingPathExtension(url.pathExtension)
+                    
+                    do {
+                        try FileManager.default.copyItem(at: url, to: tempURL)
+                        
+                        Task { @MainActor in
+                            handleFileSelection(url: tempURL)
+                        }
+                    } catch {
+                        Task { @MainActor in
+                            alertMessage = "Failed to process dropped file"
+                            showAlert = true
+                        }
+                    }
+                }
+                return
+            }
+        }
+    }
+    
+    private func handleMultiFileDrop(providers: [NSItemProvider]) {
+        Task {
+            var urls: [URL] = []
             
-            if let window = NSApp.windows.first {
-                panel.beginSheetModal(for: window) { response in
-                    if response == .OK, let url = panel.url {
-                        handleFileSelection(url: url)
+            for provider in providers {
+                for type in supportedTypes {
+                    if provider.hasItemConformingToTypeIdentifier(type.identifier) {
+                        do {
+                            let url = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<URL, Error>) in
+                                provider.loadFileRepresentation(forTypeIdentifier: type.identifier) { url, error in
+                                    if let error = error {
+                                        continuation.resume(throwing: error)
+                                    } else if let url = url {
+                                        // Create a temporary copy immediately while the file is still available
+                                        let tempURL = FileManager.default.temporaryDirectory
+                                            .appendingPathComponent(UUID().uuidString)
+                                            .appendingPathExtension(url.pathExtension)
+                                        
+                                        do {
+                                            try FileManager.default.copyItem(at: url, to: tempURL)
+                                            continuation.resume(returning: tempURL)
+                                        } catch {
+                                            continuation.resume(throwing: error)
+                                        }
+                                    } else {
+                                        continuation.resume(throwing: NSError(domain: "", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to load file"]))
+                                    }
+                                }
+                            }
+                            
+                            urls.append(url)
+                        } catch {
+                            print("Failed to process dropped file: \(error.localizedDescription)")
+                        }
+                        break
                     }
                 }
             }
+            
+            if !urls.isEmpty {
+                await MainActor.run {
+                    multiProcessor.addFiles(urls)
+                }
+            }
+        }
     }
     
     private func handleFileSelection(url: URL) {
         Task {
+            let dimensionValue = shouldResize ? Double(maxDimension) ?? 2048 : nil
+            let settings = CompressionSettings(
+                quality: 0.7,
+                pngCompressionLevel: 6,
+                preserveMetadata: true,
+                maxDimension: dimensionValue != nil ? CGFloat(dimensionValue!) : nil,
+                optimizeForWeb: true
+            )
+            
             do {
-                let dimensionValue = shouldResize ? Double(maxDimension) ?? 2048 : nil
-                print("Debug - Selected max dimension:", dimensionValue ?? "nil")
-                
-                let settings = CompressionSettings(
-                    quality: 0.7,
-                    pngCompressionLevel: 6,
-                    preserveMetadata: true,
-                    maxDimension: dimensionValue != nil ? CGFloat(dimensionValue!) : nil,
-                    optimizeForWeb: true
-                )
-                
                 try await processor.processFile(url: url, settings: settings)
             } catch {
                 await MainActor.run {
@@ -187,12 +252,11 @@ struct ContentView: View {
         }
     }
     
-    @MainActor
     private func saveCompressedFile(url: URL, originalName: String) async {
         let panel = NSSavePanel()
         panel.canCreateDirectories = true
         panel.showsTagField = false
-        panel.nameFieldStringValue = "compressed_" + originalName
+        panel.nameFieldStringValue = originalName + "_compressed"
         panel.allowedContentTypes = [UTType(filenameExtension: url.pathExtension)].compactMap { $0 }
         panel.message = "Choose where to save the compressed file"
         
@@ -206,13 +270,17 @@ struct ContentView: View {
                     try FileManager.default.copyItem(at: url, to: saveURL)
                     processor.cleanup()
                 } catch {
-                    alertMessage = "Failed to save file: \(error.localizedDescription)"
-                    showAlert = true
+                    await MainActor.run {
+                        alertMessage = "Failed to save file: \(error.localizedDescription)"
+                        showAlert = true
+                    }
                 }
             }
         } catch {
-            alertMessage = "Failed to show save dialog"
-            showAlert = true
+            await MainActor.run {
+                alertMessage = "Failed to show save dialog"
+                showAlert = true
+            }
         }
     }
 }
