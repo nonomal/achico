@@ -40,7 +40,8 @@ Download from the [releases](https://github.com/nuance-dev/Achico/releases/) pag
 3. Watch the magic happen
 4. Get your compressed files
 5. That's it!
-6. Update, from v2 onwards you can resize your files!
+6. Update: you can now resize your images and videos
+7. Update: you can now drop multiple files
 ![42630](https://github.com/user-attachments/assets/6def2137-fd12-4f7d-b59a-4476ae506331)
 
 
