@@ -2,7 +2,6 @@ import Foundation
 import UniformTypeIdentifiers
 import SwiftUI
 
-
 struct FileProcessingState: Identifiable {
     let id: UUID
     let url: URL
@@ -61,6 +60,36 @@ class MultiFileProcessor: ObservableObject {
         processingTasks[id] = task
     }
     
+    func saveAllFilesToFolder() async {
+        let panel = NSOpenPanel()
+        panel.canCreateDirectories = true
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.message = "Choose where to save all compressed files"
+        panel.prompt = "Select Folder"
+        
+        guard let window = NSApp.windows.first else { return }
+        let response = await panel.beginSheetModal(for: window)
+        
+        if response == .OK, let folderURL = panel.url {
+            for file in files {
+                if let result = file.result {
+                    do {
+                        let originalURL = URL(fileURLWithPath: result.fileName)
+                        let filenameWithoutExt = originalURL.deletingPathExtension().lastPathComponent
+                        let fileExtension = originalURL.pathExtension
+                        let newFileName = "\(filenameWithoutExt)_compressed.\(fileExtension)"
+                        let destinationURL = folderURL.appendingPathComponent(newFileName)
+                        
+                        try FileManager.default.copyItem(at: result.compressedURL, to: destinationURL)
+                    } catch {
+                        print("Failed to save file \(result.fileName): \(error.localizedDescription)")
+                    }
+                }
+            }
+        }
+    }
+    
     private func processFileInternal(with id: UUID) async {
         guard let index = files.firstIndex(where: { $0.id == id }) else { return }
         guard index < files.count else { return }
@@ -95,59 +124,12 @@ class MultiFileProcessor: ObservableObject {
         // Clean up the task
         processingTasks.removeValue(forKey: id)
     }
-}
-
-struct MultiFileView: View {
-    @ObservedObject var processor: MultiFileProcessor
-    @Binding var shouldResize: Bool
-    @Binding var maxDimension: String
-    let supportedTypes: [UTType]
     
-    var body: some View {
-        VStack(spacing: 20) {
-            List {
-                ForEach(Array(processor.files.enumerated()), id: \.element.id) { index, file in
-                    FileRow(
-                        file: file,
-                        onSave: {
-                            if let result = file.result {
-                                Task {
-                                    await saveCompressedFile(url: result.compressedURL, originalName: result.fileName)
-                                }
-                            }
-                        },
-                        onRemove: {
-                            processor.removeFile(at: index)
-                        }
-                    )
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color(NSColor.controlBackgroundColor).opacity(0.1))
-            .cornerRadius(8)
-            
-            if !processor.files.isEmpty {
-                HStack {
-                    Button(action: {
-                        processor.clearFiles()
-                    }) {
-                        Text("Clear All")
-                            .font(.system(size: 14, weight: .medium))
-                    }
-                    .buttonStyle(SecondaryButtonStyle())
-                }
-                .padding(.top, 8)
-            }
-        }
-        .padding()
-    }
-    
-    private func saveCompressedFile(url: URL, originalName: String) async {
+    func saveCompressedFile(url: URL, originalName: String) async {
         let panel = NSSavePanel()
         panel.canCreateDirectories = true
         panel.showsTagField = false
         
-        // Use the original name directly
         let fileURL = URL(fileURLWithPath: originalName)
         let filenameWithoutExt = fileURL.deletingPathExtension().lastPathComponent
         let fileExtension = fileURL.pathExtension
@@ -169,65 +151,204 @@ struct MultiFileView: View {
         }
     }
     
-    struct FileRow: View {
-        let file: FileProcessingState
-        let onSave: () -> Void
-        let onRemove: () -> Void
-        
-        var body: some View {
-            HStack(spacing: 12) {
-                // File icon
-                Image(systemName: "doc")
-                    .font(.system(size: 20))
-                    .foregroundColor(.secondary)
-                
-                // File name and status
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(file.url.lastPathComponent)  // Show original filename
-                        .font(.system(size: 14, weight: .medium))
-                        .lineLimit(1)
-                    
-                    if let result = file.result {
-                        Text("Reduced by \(result.savedPercentage)%")
-                            .font(.system(size: 12))
-                            .foregroundColor(.secondary)
-                    } else if let error = file.error {
-                        Text(error.localizedDescription)
-                            .font(.system(size: 12))
-                            .foregroundColor(.red)
-                    } else if file.isProcessing {
-                        Text("Processing...")
-                            .font(.system(size: 12))
-                            .foregroundColor(.secondary)
-                    }
-                }
+    func downloadAllFiles() async {
+        for file in files {
+            if let result = file.result {
+                await saveCompressedFile(url: result.compressedURL, originalName: result.fileName)
+            }
+        }
+    }
+}
+
+struct MultiFileView: View {
+    @ObservedObject var processor: MultiFileProcessor
+    @Binding var shouldResize: Bool
+    @Binding var maxDimension: String
+    let supportedTypes: [UTType]
+    @State private var hoveredFileID: UUID?
+    
+    init(processor: MultiFileProcessor, shouldResize: Binding<Bool>, maxDimension: Binding<String>, supportedTypes: [UTType]) {
+        self._processor = ObservedObject(wrappedValue: processor)
+        self._shouldResize = shouldResize
+        self._maxDimension = maxDimension
+        self.supportedTypes = supportedTypes
+    }
+    
+    var body: some View {
+        VStack(spacing: 20) {
+            // Header section with ButtonGroup
+            HStack {
+                Text("Files")
+                    .font(.title2)
+                    .fontWeight(.semibold)
                 
                 Spacer()
                 
-                // Progress or actions
-                HStack(spacing: 8) {
-                    if file.isProcessing {
-                        ProgressView()
-                            .scaleEffect(0.8)
-                            .frame(width: 16, height: 16)
-                    } else if let result = file.result {
-                        Button(action: onSave) {
-                            Image(systemName: "square.and.arrow.down")
-                                .font(.system(size: 14))
-                        }
-                        .buttonStyle(PlainButtonStyle())
-                    }
-                    
-                    Button(action: onRemove) {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 14))
-                            .foregroundColor(.secondary)
-                    }
-                    .buttonStyle(PlainButtonStyle())
+                if !processor.files.isEmpty {
+                    ButtonGroup(buttons: [
+                        (
+                            title: "Save All",
+                            icon: "folder.fill.badge.plus",
+                            action: {
+                                Task {
+                                    await processor.saveAllFilesToFolder()
+                                }
+                            }
+                        ),
+                        (
+                            title: "Clear All",
+                            icon: "trash.fill",
+                            action: {
+                                processor.clearFiles()
+                            }
+                        )
+                    ])
                 }
             }
-            .padding(.vertical, 8)
-            .padding(.horizontal, 12)
+            .padding(.horizontal)
+            
+            // File list
+            VStack(spacing: 0) { // Wrapper for consistent padding
+                ScrollView {
+                    LazyVStack(spacing: 8) {
+                        ForEach(Array(processor.files.enumerated()), id: \.element.id) { index, file in
+                            FileRow(
+                                file: file,
+                                isHovered: hoveredFileID == file.id,
+                                onSave: {
+                                    if let result = file.result {
+                                        Task {
+                                            await processor.saveCompressedFile(
+                                                url: result.compressedURL,
+                                                originalName: result.fileName
+                                            )
+                                        }
+                                    }
+                                },
+                                onRemove: {
+                                    processor.removeFile(at: index)
+                                }
+                            )
+                            .onHover { isHovered in
+                                hoveredFileID = isHovered ? file.id : nil
+                            }
+                        }
+                    }
+                    .padding(.horizontal)
+                    .padding(.vertical) // Add vertical padding inside scroll view
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color(NSColor.controlBackgroundColor).opacity(0.5))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+        }
+        .padding()
+    }
+}
+
+struct FileRow: View {
+    let file: FileProcessingState
+    let isHovered: Bool
+    let onSave: () -> Void
+    let onRemove: () -> Void
+    
+    var body: some View {
+        HStack(spacing: 16) {
+            // File icon with extension badge
+            ZStack(alignment: .bottomTrailing) {
+                getFileIcon(for: file.url.pathExtension.lowercased())
+                    .font(.system(size: 28))
+                
+                Text(file.url.pathExtension.uppercased())
+                    .font(.system(size: 8, weight: .bold))
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 2)
+                    .background(.ultraThinMaterial)
+                    .clipShape(RoundedRectangle(cornerRadius: 4))
+            }
+            
+            // File info
+            VStack(alignment: .leading, spacing: 4) {
+                Text(file.url.lastPathComponent)
+                    .font(.headline)
+                    .lineLimit(1)
+                
+                Group {
+                    if let result = file.result {
+                        Label(
+                            "Reduced by \(result.savedPercentage)%",
+                            systemImage: "arrow.down.circle.fill"
+                        )
+                        .foregroundStyle(.green)
+                    } else if let error = file.error {
+                        Label(
+                            error.localizedDescription,
+                            systemImage: "exclamationmark.circle.fill"
+                        )
+                        .foregroundStyle(.red)
+                    } else if file.isProcessing {
+                        Label(
+                            "Processing...",
+                            systemImage: "arrow.triangle.2.circlepath"
+                        )
+                        .foregroundStyle(.blue)
+                    }
+                }
+                .font(.subheadline)
+            }
+            
+            Spacer()
+            
+            // Actions
+            HStack(spacing: 12) {
+                if file.isProcessing {
+                    ProgressView()
+                        .controlSize(.small)
+                } else if let _ = file.result {
+                    Button(action: onSave) {
+                        Label("Download", systemImage: "square.and.arrow.down.fill")
+                    }
+                    .buttonStyle(GlassButtonStyle())
+                }
+                
+                Button(action: onRemove) {
+                    Image(systemName: "trash.fill")
+                        .foregroundStyle(.red.opacity(0.8))
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+            .opacity(isHovered ? 1 : 0.7)
+        }
+        .padding()
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(isHovered ? Color(NSColor.controlBackgroundColor).opacity(0.7) : Color.clear)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(Color.primary.opacity(0.1), lineWidth: 1)
+                )
+        )
+        .contentShape(Rectangle())
+    }
+    
+    @ViewBuilder
+    private func getFileIcon(for extension: String) -> some View {
+        switch `extension` {
+        case "jpg", "jpeg", "png", "heic", "webp":
+            Image(systemName: "photo.fill")
+                .foregroundStyle(.blue)
+        case "mp4", "mov", "avi":
+            Image(systemName: "video.fill")
+                .foregroundStyle(.purple)
+        case "mp3", "wav", "aiff":
+            Image(systemName: "music.note")
+                .foregroundStyle(.pink)
+        case "pdf":
+            Image(systemName: "doc.fill")
+                .foregroundStyle(.red)
+        default:
+            Image(systemName: "doc.fill")
+                .foregroundStyle(.secondary)
         }
     }
 }
