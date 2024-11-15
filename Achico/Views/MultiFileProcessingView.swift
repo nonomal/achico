@@ -5,14 +5,26 @@ import SwiftUI
 struct FileProcessingState: Identifiable {
     let id: UUID
     let url: URL
+    let originalFileName: String
     var progress: Double
     var result: FileProcessor.ProcessingResult?
     var isProcessing: Bool
     var error: Error?
     
+    // Add this computed property
+    var displayFileName: String {
+        // If the filename contains UUID prefix, remove it
+        let filename = url.lastPathComponent
+        if let range = filename.range(of: "_") {
+            return String(filename[range.upperBound...])
+        }
+        return originalFileName
+    }
+    
     init(url: URL) {
         self.id = UUID()
         self.url = url
+        self.originalFileName = url.lastPathComponent
         self.progress = 0
         self.result = nil
         self.isProcessing = false
@@ -75,7 +87,8 @@ class MultiFileProcessor: ObservableObject {
             for file in files {
                 if let result = file.result {
                     do {
-                        let originalURL = URL(fileURLWithPath: result.fileName)
+                        // Use the original filename instead of the result filename
+                        let originalURL = URL(fileURLWithPath: file.originalFileName)
                         let filenameWithoutExt = originalURL.deletingPathExtension().lastPathComponent
                         let fileExtension = originalURL.pathExtension
                         let newFileName = "\(filenameWithoutExt)_compressed.\(fileExtension)"
@@ -83,7 +96,7 @@ class MultiFileProcessor: ObservableObject {
                         
                         try FileManager.default.copyItem(at: result.compressedURL, to: destinationURL)
                     } catch {
-                        print("Failed to save file \(result.fileName): \(error.localizedDescription)")
+                        print("Failed to save file \(file.originalFileName): \(error.localizedDescription)")
                     }
                 }
             }
@@ -130,9 +143,10 @@ class MultiFileProcessor: ObservableObject {
         panel.canCreateDirectories = true
         panel.showsTagField = false
         
-        let fileURL = URL(fileURLWithPath: originalName)
-        let filenameWithoutExt = fileURL.deletingPathExtension().lastPathComponent
-        let fileExtension = fileURL.pathExtension
+        // Use originalName directly instead of extracting from URL
+        let originalURL = URL(fileURLWithPath: originalName)
+        let filenameWithoutExt = originalURL.deletingPathExtension().lastPathComponent
+        let fileExtension = originalURL.pathExtension
         panel.nameFieldStringValue = "\(filenameWithoutExt)_compressed.\(fileExtension)"
         
         panel.allowedContentTypes = [UTType(filenameExtension: url.pathExtension)].compactMap { $0 }
@@ -154,7 +168,7 @@ class MultiFileProcessor: ObservableObject {
     func downloadAllFiles() async {
         for file in files {
             if let result = file.result {
-                await saveCompressedFile(url: result.compressedURL, originalName: result.fileName)
+                await saveCompressedFile(url: result.compressedURL, originalName: file.originalFileName)
             }
         }
     }
@@ -220,7 +234,7 @@ struct MultiFileView: View {
                                         Task {
                                             await processor.saveCompressedFile(
                                                 url: result.compressedURL,
-                                                originalName: result.fileName
+                                                originalName: file.originalFileName
                                             )
                                         }
                                     }
@@ -269,7 +283,7 @@ struct FileRow: View {
             
             // File info
             VStack(alignment: .leading, spacing: 4) {
-                Text(file.url.lastPathComponent)
+                Text(file.displayFileName)
                     .font(.headline)
                     .lineLimit(1)
                 

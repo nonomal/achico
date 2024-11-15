@@ -44,11 +44,24 @@ class FileProcessor: ObservableObject {
         let compressedSize: Int64
         let compressedURL: URL
         let fileName: String
+        let originalFileName: String
         
         var savedPercentage: Int {
             guard originalSize > 0 else { return 0 }
             let percentage = Int(((Double(originalSize) - Double(compressedSize)) / Double(originalSize)) * 100)
             return max(0, percentage)
+        }
+        
+        var suggestedFileName: String {
+            // Remove UUID from filename if present
+            let cleanFilename = originalFileName
+                .replacingOccurrences(of: #"[A-F0-9]{8}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{12}\."#,
+                                    with: "",
+                                    options: .regularExpression)
+            let fileURL = URL(fileURLWithPath: cleanFilename)
+            let filenameWithoutExt = fileURL.deletingPathExtension().lastPathComponent
+            let fileExtension = compressedURL.pathExtension
+            return "\(filenameWithoutExt)_compressed.\(fileExtension)"
         }
     }
     
@@ -182,13 +195,25 @@ class FileProcessor: ObservableObject {
     
     // MARK: - Public Methods
     @MainActor
-    func processFile(url: URL, settings: CompressionSettings? = nil) async throws {
+    func processFile(url: URL, settings: CompressionSettings? = nil, originalFileName: String? = nil) async throws {
+        print("Debug - Processing file:")
+        print("Debug - Input URL: \(url)")
+        print("Debug - Original filename provided: \(originalFileName ?? "none")")
+        print("Debug - URL's lastPathComponent: \(url.lastPathComponent)")
+        
         isProcessing = true
         progress = 0
         processingResult = nil
         
         do {
-            let result = try await processInBackground(url: url, settings: settings)
+            let result = try await processInBackground(
+                url: url,
+                settings: settings,
+                originalFileName: originalFileName ?? url.lastPathComponent
+            )
+            print("Debug - Processing completed:")
+            print("Debug - Result filename: \(result.fileName)")
+            print("Debug - Result original filename: \(result.originalFileName)")
             self.processingResult = result
         } catch {
             isProcessing = false
@@ -205,9 +230,16 @@ class FileProcessor: ObservableObject {
     }
     
     // MARK: - Private Methods - Main Processing
-    private func processInBackground(url: URL, settings: CompressionSettings? = nil) async throws -> ProcessingResult {
+    private func processInBackground(url: URL, settings: CompressionSettings? = nil, originalFileName: String) async throws -> ProcessingResult {
+        print("Debug - Starting background processing:")
+            print("Debug - Input URL: \(url)")
+            print("Debug - Original filename: \(originalFileName)")
         let originalSize = try FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int64 ?? 0
-        let tempURL = try cacheManager.createTemporaryURL(for: url.lastPathComponent)
+        print("Debug - Creating temporary URL for: \(originalFileName)")
+        let originalExtension = url.pathExtension
+        let tempURL = try cacheManager.createTemporaryURL(for: originalFileName)
+        
+        
         
         let compressionSettings = settings ?? CompressionSettings()
         
@@ -246,12 +278,15 @@ class FileProcessor: ObservableObject {
         }
         
         let compressedSize = try FileManager.default.attributesOfItem(atPath: tempURL.path)[.size] as? Int64 ?? 0
-
+        print("Debug - Creating ProcessingResult:")
+            print("Debug - Temp URL last component: \(tempURL.lastPathComponent)")
+            print("Debug - Original filename being used: \(originalFileName)")
             return ProcessingResult(
                 originalSize: originalSize,
                 compressedSize: compressedSize,
                 compressedURL: tempURL,
-                fileName: url.lastPathComponent
+                fileName: tempURL.lastPathComponent,
+                originalFileName: originalFileName
             )
     }
     

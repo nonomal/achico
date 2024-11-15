@@ -129,8 +129,11 @@ struct ContentView: View {
             panel.beginSheetModal(for: window) { response in
                 if response == .OK {
                     if panel.urls.count == 1, let url = panel.urls.first {
-                        handleFileSelection(url: url)
+                        print("📁 Selected single file: \(url.path)")
+                        print("📝 Original filename: \(url.lastPathComponent)")
+                        handleFileSelection(url: url, originalFilename: url.lastPathComponent)  // Pass originalFilename
                     } else if panel.urls.count > 1 {
+                        print("📁 Selected multiple files: \(panel.urls.map { $0.lastPathComponent })")
                         Task { @MainActor in
                             multiProcessor.addFiles(panel.urls)
                         }
@@ -139,21 +142,24 @@ struct ContentView: View {
             }
         }
     }
-    
-    private func handleDrop(providers: [NSItemProvider]) {
-        if providers.count == 1 {
-            guard let provider = providers.first else { return }
-            handleSingleFileDrop(provider: provider)
-        } else {
-            handleMultiFileDrop(providers: providers)
+        
+        private func handleDrop(providers: [NSItemProvider]) {
+            print("🔄 Handling drop with \(providers.count) providers")
+            if providers.count == 1 {
+                guard let provider = providers.first else { return }
+                handleSingleFileDrop(provider: provider)
+            } else {
+                handleMultiFileDrop(providers: providers)
+            }
         }
-    }
-    
+        
     private func handleSingleFileDrop(provider: NSItemProvider) {
         for type in supportedTypes {
             if provider.hasItemConformingToTypeIdentifier(type.identifier) {
+                print("📥 Processing dropped file of type: \(type.identifier)")
                 provider.loadFileRepresentation(forTypeIdentifier: type.identifier) { url, error in
                     guard let url = url else {
+                        print("❌ Failed to load dropped file URL")
                         Task { @MainActor in
                             alertMessage = "Failed to load file"
                             showAlert = true
@@ -161,17 +167,25 @@ struct ContentView: View {
                         return
                     }
                     
+                    print("📄 Original dropped file URL: \(url.path)")
+                    let originalFilename = url.lastPathComponent
+                    print("📝 Original dropped filename: \(originalFilename)")
+                    
                     let tempURL = FileManager.default.temporaryDirectory
                         .appendingPathComponent(UUID().uuidString)
                         .appendingPathExtension(url.pathExtension)
                     
+                    print("🔄 Creating temp file at: \(tempURL.path)")
+                    
                     do {
                         try FileManager.default.copyItem(at: url, to: tempURL)
+                        print("✅ Successfully copied to temp location")
                         
                         Task { @MainActor in
-                            handleFileSelection(url: tempURL)
+                            handleFileSelection(url: tempURL, originalFilename: originalFilename)  // Pass originalFilename
                         }
                     } catch {
+                        print("❌ Failed to copy dropped file: \(error.localizedDescription)")
                         Task { @MainActor in
                             alertMessage = "Failed to process dropped file"
                             showAlert = true
@@ -182,55 +196,12 @@ struct ContentView: View {
             }
         }
     }
-    
-    private func handleMultiFileDrop(providers: [NSItemProvider]) {
-        Task {
-            var urls: [URL] = []
-            
-            for provider in providers {
-                for type in supportedTypes {
-                    if provider.hasItemConformingToTypeIdentifier(type.identifier) {
-                        do {
-                            let url = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<URL, Error>) in
-                                provider.loadFileRepresentation(forTypeIdentifier: type.identifier) { url, error in
-                                    if let error = error {
-                                        continuation.resume(throwing: error)
-                                    } else if let url = url {
-                                        // Create a temporary copy immediately while the file is still available
-                                        let tempURL = FileManager.default.temporaryDirectory
-                                            .appendingPathComponent(UUID().uuidString)
-                                            .appendingPathExtension(url.pathExtension)
-                                        
-                                        do {
-                                            try FileManager.default.copyItem(at: url, to: tempURL)
-                                            continuation.resume(returning: tempURL)
-                                        } catch {
-                                            continuation.resume(throwing: error)
-                                        }
-                                    } else {
-                                        continuation.resume(throwing: NSError(domain: "", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to load file"]))
-                                    }
-                                }
-                            }
-                            
-                            urls.append(url)
-                        } catch {
-                            print("Failed to process dropped file: \(error.localizedDescription)")
-                        }
-                        break
-                    }
-                }
-            }
-            
-            if !urls.isEmpty {
-                await MainActor.run {
-                    multiProcessor.addFiles(urls)
-                }
-            }
-        }
-    }
-    
-    private func handleFileSelection(url: URL) {
+
+    private func handleFileSelection(url: URL, originalFilename: String? = nil) {
+        print("🔄 Processing file selection for URL: \(url.path)")
+        let filename = originalFilename ?? url.lastPathComponent
+        print("📝 Original filename: \(filename)")
+        
         Task {
             let dimensionValue = shouldResize ? Double(maxDimension) ?? 2048 : nil
             let settings = CompressionSettings(
@@ -242,8 +213,9 @@ struct ContentView: View {
             )
             
             do {
-                try await processor.processFile(url: url, settings: settings)
+                try await processor.processFile(url: url, settings: settings, originalFileName: filename)
             } catch {
+                print("❌ File processing error: \(error.localizedDescription)")
                 await MainActor.run {
                     alertMessage = error.localizedDescription
                     showAlert = true
@@ -251,19 +223,116 @@ struct ContentView: View {
             }
         }
     }
-    
-    private func saveCompressedFile(url: URL, originalName: String) async {
+        
+        private func handleMultiFileDrop(providers: [NSItemProvider]) {
+            Task {
+                print("📥 Processing multiple dropped files")
+                var urls: [URL] = []
+                
+                for (index, provider) in providers.enumerated() {
+                    for type in supportedTypes {
+                        if provider.hasItemConformingToTypeIdentifier(type.identifier) {
+                            do {
+                                let url = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<URL, Error>) in
+                                    provider.loadFileRepresentation(forTypeIdentifier: type.identifier) { url, error in
+                                        if let error = error {
+                                            print("❌ Error loading file \(index + 1): \(error.localizedDescription)")
+                                            continuation.resume(throwing: error)
+                                        } else if let url = url {
+                                            print("📄 Original file \(index + 1) URL: \(url.path)")
+                                            print("📝 Original filename \(index + 1): \(url.lastPathComponent)")
+                                            
+                                            let originalFileName = url.lastPathComponent
+                                            let tempURL = FileManager.default.temporaryDirectory
+                                                .appendingPathComponent("\(UUID().uuidString)_\(originalFileName)")
+                                            
+                                            print("🔄 Creating temp file \(index + 1) at: \(tempURL.path)")
+                                            
+                                            do {
+                                                try FileManager.default.copyItem(at: url, to: tempURL)
+                                                print("✅ Successfully copied file \(index + 1) to temp location")
+                                                continuation.resume(returning: tempURL)
+                                            } catch {
+                                                print("❌ Failed to copy file \(index + 1): \(error.localizedDescription)")
+                                                continuation.resume(throwing: error)
+                                            }
+                                        } else {
+                                            print("❌ No URL available for file \(index + 1)")
+                                            continuation.resume(throwing: NSError(domain: "", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to load file"]))
+                                        }
+                                    }
+                                }
+                                
+                                urls.append(url)
+                            } catch {
+                                print("❌ Failed to process dropped file \(index + 1): \(error.localizedDescription)")
+                            }
+                            break
+                        }
+                    }
+                }
+                
+                if !urls.isEmpty {
+                    print("✅ Successfully processed \(urls.count) files")
+                    print("📁 Temp URLs: \(urls.map { $0.path })")
+                    await MainActor.run {
+                        multiProcessor.addFiles(urls)
+                    }
+                }
+            }
+        }
+        
+    private func handleFileSelection(url: URL) {
+        print("🔄 Processing file selection for URL: \(url.path)")
+        print("📝 Original filename: \(url.lastPathComponent)")
+        
+        Task {
+            let dimensionValue = shouldResize ? Double(maxDimension) ?? 2048 : nil
+            let settings = CompressionSettings(
+                quality: 0.7,
+                pngCompressionLevel: 6,
+                preserveMetadata: true,
+                maxDimension: dimensionValue != nil ? CGFloat(dimensionValue!) : nil,
+                optimizeForWeb: true
+            )
+            
+            do {
+                // Store original filename before processing
+                let originalFileName = url.lastPathComponent
+                try await processor.processFile(url: url, settings: settings, originalFileName: originalFileName)
+            } catch {
+                print("❌ File processing error: \(error.localizedDescription)")
+                await MainActor.run {
+                    alertMessage = error.localizedDescription
+                    showAlert = true
+                }
+            }
+        }
+    }
+        
+    @MainActor
+    func saveCompressedFile(url: URL, originalName: String) async {
+        print("💾 Saving compressed file")
+        print("📝 Original name: \(originalName)")
+        print("📁 Compressed file URL: \(url.path)")
+        
         let panel = NSSavePanel()
         panel.canCreateDirectories = true
         panel.showsTagField = false
         
-        // Get the original file name without any UUID
+        // Extract original filename without UUID
         let originalURL = URL(fileURLWithPath: originalName)
         let filenameWithoutExt = originalURL.deletingPathExtension().lastPathComponent
-        let fileExtension = originalURL.pathExtension
-        panel.nameFieldStringValue = "\(filenameWithoutExt)_compressed.\(fileExtension)"
+            .replacingOccurrences(of: #"[A-F0-9]{8}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{12}\."#,
+                                 with: "",
+                                 options: .regularExpression)
+        let fileExtension = url.pathExtension
         
-        panel.allowedContentTypes = [UTType(filenameExtension: url.pathExtension)].compactMap { $0 }
+        let suggestedName = "\(filenameWithoutExt)_compressed.\(fileExtension)"
+        print("📝 Suggested save name: \(suggestedName)")
+        panel.nameFieldStringValue = suggestedName
+        
+        panel.allowedContentTypes = [UTType(filenameExtension: fileExtension)].compactMap { $0 }
         panel.message = "Choose where to save the compressed file"
         
         guard let window = NSApp.windows.first else { return }
@@ -271,15 +340,18 @@ struct ContentView: View {
         let response = await panel.beginSheetModal(for: window)
         
         if response == .OK, let saveURL = panel.url {
+            print("📥 Saving to: \(saveURL.path)")
             do {
                 try FileManager.default.copyItem(at: url, to: saveURL)
-                processor.cleanup()  // Only for ContentView
+                print("✅ File saved successfully")
+                processor.cleanup()
             } catch {
-                await MainActor.run {
-                    alertMessage = "Failed to save file: \(error.localizedDescription)"
-                    showAlert = true
-                }
+                print("❌ Save error: \(error.localizedDescription)")
+                alertMessage = "Failed to save file: \(error.localizedDescription)"
+                showAlert = true
             }
+        } else {
+            print("❌ Save cancelled or window not found")
         }
     }
 }
