@@ -196,10 +196,6 @@ class FileProcessor: ObservableObject {
     // MARK: - Public Methods
     @MainActor
     func processFile(url: URL, settings: CompressionSettings? = nil, originalFileName: String? = nil) async throws {
-        print("Debug - Processing file:")
-        print("Debug - Input URL: \(url)")
-        print("Debug - Original filename provided: \(originalFileName ?? "none")")
-        print("Debug - URL's lastPathComponent: \(url.lastPathComponent)")
         
         isProcessing = true
         progress = 0
@@ -211,9 +207,7 @@ class FileProcessor: ObservableObject {
                 settings: settings,
                 originalFileName: originalFileName ?? url.lastPathComponent
             )
-            print("Debug - Processing completed:")
-            print("Debug - Result filename: \(result.fileName)")
-            print("Debug - Result original filename: \(result.originalFileName)")
+            
             self.processingResult = result
         } catch {
             isProcessing = false
@@ -231,11 +225,7 @@ class FileProcessor: ObservableObject {
     
     // MARK: - Private Methods - Main Processing
     private func processInBackground(url: URL, settings: CompressionSettings? = nil, originalFileName: String) async throws -> ProcessingResult {
-        print("Debug - Starting background processing:")
-            print("Debug - Input URL: \(url)")
-            print("Debug - Original filename: \(originalFileName)")
         let originalSize = try FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int64 ?? 0
-        print("Debug - Creating temporary URL for: \(originalFileName)")
         let originalExtension = url.pathExtension
         let tempURL = try cacheManager.createTemporaryURL(for: originalFileName)
         
@@ -530,29 +520,29 @@ class FileProcessor: ObservableObject {
     }
     
     private func compressImage(_ image: NSImage, format: NSBitmapImageRep.FileType, settings: CompressionSettings) -> Data? {
-        print("Debug - Original image size: \(image.size.width) x \(image.size.height)")
+        
         guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
-            print("Debug - Failed to get CGImage")
+            
             return nil
         }
         
         let processedCGImage: CGImage
         if let maxDimension = settings.maxDimension {
-            print("Debug - Attempting resize to max dimension: \(maxDimension)")
+            
             if let resized = resizeImage(cgImage, maxDimension: maxDimension) {
                 processedCGImage = resized
-                print("Debug - Resized successfully")
+                
             } else {
-                print("Debug - Resize failed, using original")
+                
                 processedCGImage = cgImage
             }
         } else {
-            print("Debug - No resize requested")
+            
             processedCGImage = cgImage
         }
         
         let bitmapRep = NSBitmapImageRep(cgImage: processedCGImage)
-        print("Debug - Final image size: \(bitmapRep.size.width) x \(bitmapRep.size.height)")
+        
         
         var compressionProperties: [NSBitmapImageRep.PropertyKey: Any] = [:]
         
@@ -622,11 +612,11 @@ class FileProcessor: ObservableObject {
         
         // Get the resized image
         guard let resizedImage = context.makeImage() else {
-            print("Debug - Failed to create resized image")
+            
             return nil
         }
         
-        print("Debug - Successfully resized image to \(newWidth) x \(newHeight)")
+        
         return resizedImage
     }
     
