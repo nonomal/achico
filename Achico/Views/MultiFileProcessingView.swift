@@ -158,6 +158,11 @@ class MultiFileProcessor: ObservableObject {
         
         if response == .OK, let saveURL = panel.url {
             do {
+                // Check if file exists
+                if FileManager.default.fileExists(atPath: saveURL.path) {
+                    try FileManager.default.removeItem(at: saveURL)
+                }
+                
                 try FileManager.default.copyItem(at: url, to: saveURL)
             } catch {
                 print("Failed to save file: \(error.localizedDescription)")

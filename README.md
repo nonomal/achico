@@ -7,6 +7,7 @@ A lightweight, native macOS app that intelligently compresses files while mainta
 ## Features
 
 ### File Support
+
 - **PDFs**: Smart compression while preserving readability
 - **Images**: Support for JPEG, PNG, HEIC, TIFF, GIF, BMP, WebP, SVG, RAW, and ICO
 - **Videos**: MP4, MOV, AVI, and other common formats
@@ -14,6 +15,7 @@ A lightweight, native macOS app that intelligently compresses files while mainta
 - **File Resizing**: Optionally resize images and videos while compressing
 
 ### Core Features
+
 - **Multiple Input Methods**: Drag & drop or click to select files
 - **Real-time Progress**: Watch your files being compressed with a clean progress indicator
 - **Compression Stats**: See how much space you've saved instantly
@@ -21,13 +23,13 @@ A lightweight, native macOS app that intelligently compresses files while mainta
 - **Native Performance**: Built with SwiftUI for optimal macOS integration
 
 ### Compression Options
+
 - **Quality Control**: Adjust compression levels to balance size and quality
 - **Size Limits**: Set maximum dimensions for images and videos
 - **Format Conversion**: Automatic conversion of less efficient formats
 - **Metadata Handling**: Option to preserve or strip metadata
 
 ![compression-demo](https://github.com/user-attachments/assets/e494937d-7e52-4d6c-9046-d6b0d577c67e)
-
 
 ## 💻 Get Started
 
@@ -42,8 +44,7 @@ Download from the [releases](https://github.com/nuance-dev/Achico/releases/) pag
 5. That's it!
 6. Update: you can now resize your images and videos
 7. Update: you can now drop multiple files
-![42630](https://github.com/user-attachments/assets/6def2137-fd12-4f7d-b59a-4476ae506331)
-
+   ![42630](https://github.com/user-attachments/assets/6def2137-fd12-4f7d-b59a-4476ae506331)
 
 ## 🛠 Technical Details
 
@@ -77,6 +78,7 @@ We welcome contributions! Here's how you can help:
 5. Open a Pull Request
 
 Please ensure your PR:
+
 - Follows the existing code style
 - Includes appropriate tests if applicable
 - Updates documentation as needed
@@ -87,7 +89,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 🔗 Links
 
-- Website: [Nuance](https://nuancedev.vercel.app)
+- Website: [Nuance](https://nuanc.me)
 - Report issues: [GitHub Issues](https://github.com/nuance-dev/Achico/issues)
 - Follow updates: [@NuanceDev](https://twitter.com/Nuancedev)
 
@@ -98,6 +100,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## Supported File Formats
 
 ### Images
+
 - JPEG/JPG
 - PNG
 - HEIC
@@ -110,10 +113,12 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - ICO
 
 ### Videos
+
 - MP4
 - MOV
 - AVI
 - MPEG/MPG
 
 ### Documents
+
 - PDF

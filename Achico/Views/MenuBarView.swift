@@ -112,7 +112,7 @@ struct MenuBarView: View {
             }
             .padding(.bottom, 16)
             
-            Text("Built by [Nuance](https://nuancedev.vercel.app)")
+            Text("Built by [Nuance](https://nuanc.me)")
                             .font(.footnote)
                             .foregroundColor(.secondary)
                             .padding(.bottom, 8)

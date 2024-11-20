@@ -342,6 +342,11 @@ struct ContentView: View {
         if response == .OK, let saveURL = panel.url {
             print("📥 Saving to: \(saveURL.path)")
             do {
+                // Check if file exists
+                if FileManager.default.fileExists(atPath: saveURL.path) {
+                    try FileManager.default.removeItem(at: saveURL)
+                }
+                
                 try FileManager.default.copyItem(at: url, to: saveURL)
                 print("✅ File saved successfully")
                 processor.cleanup()
